@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" color="#000000" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <circle cx="21.62" cy="24.57" r="0.86" fill="currentColor" stroke="none"/>
+  <circle cx="26.14" cy="24.59" r="0.89" fill="currentColor" stroke="none"/>
+  <circle cx="30.66" cy="24.58" r="0.87" fill="currentColor" stroke="none"/>
+  <circle cx="35.13" cy="24.59" r="0.87" fill="currentColor" stroke="none"/>
+  <circle cx="39.66" cy="24.58" r="0.88" fill="currentColor" stroke="none"/>
+  <circle cx="44.1" cy="24.6" r="0.86" fill="currentColor" stroke="none"/>
+  <circle cx="48.64" cy="24.56" r="0.89" fill="currentColor" stroke="none"/>
+  <circle cx="19.56" cy="28.5" r="0.9" fill="currentColor" stroke="none"/>
+  <circle cx="28.57" cy="28.49" r="0.89" fill="currentColor" stroke="none"/>
+  <circle cx="33.09" cy="28.5" r="0.89" fill="currentColor" stroke="none"/>
+  <circle cx="37.57" cy="28.49" r="0.89" fill="currentColor" stroke="none"/>
+  <circle cx="42.08" cy="28.51" r="0.88" fill="currentColor" stroke="none"/>
+  <circle cx="46.62" cy="28.5" r="0.93" fill="currentColor" stroke="none"/>
+  <circle cx="24.03" cy="28.55" r="0.89" fill="currentColor" stroke="none"/>
+  <circle cx="17.35" cy="32.41" r="0.88" fill="currentColor" stroke="none"/>
+  <circle cx="21.96" cy="32.41" r="0.87" fill="currentColor" stroke="none"/>
+  <circle cx="26.52" cy="32.39" r="0.89" fill="currentColor" stroke="none"/>
+  <circle cx="31.07" cy="32.41" r="0.9" fill="currentColor" stroke="none"/>
+  <circle cx="35.59" cy="32.41" r="0.87" fill="currentColor" stroke="none"/>
+  <circle cx="40.11" cy="32.42" r="0.89" fill="currentColor" stroke="none"/>
+  <circle cx="44.68" cy="32.4" r="0.9" fill="currentColor" stroke="none"/>
+  <circle cx="15.08" cy="36.27" r="0.91" fill="currentColor" stroke="none"/>
+  <circle cx="19.55" cy="36.26" r="0.89" fill="currentColor" stroke="none"/>
+  <circle cx="24.22" cy="36.28" r="0.89" fill="currentColor" stroke="none"/>
+  <circle cx="28.89" cy="36.28" r="0.88" fill="currentColor" stroke="none"/>
+  <circle cx="33.51" cy="36.25" r="0.87" fill="currentColor" stroke="none"/>
+  <circle cx="38.05" cy="36.26" r="0.89" fill="currentColor" stroke="none"/>
+  <circle cx="42.61" cy="36.24" r="0.86" fill="currentColor" stroke="none"/>
+  <path d="M54.88 22.75C54.84 22.5 54.84 21.98 54.75 21.75C54.65 21.5 54.39 20.88 54.12 20.88C45.63 20.69 28.62 20.7 20.12 21C19.75 21.01 19.32 21.81 19.12 22.12C16.67 26.06 11.82 33.98 9.5 38C9.31 38.34 9.22 39.12 9.12 39.5"/>
+  <path d="M54.88 22.75C54.59 22.91 53.91 23.09 53.75 23.38C51.66 27.14 47.88 34.88 46 38.75C45.9 38.95 45.91 39.41 45.88 39.62"/>
+  <path d="M54.88 22.75C55 22.84 55.35 22.97 55.38 23.12C55.45 23.53 55.42 24.38 55.25 24.75C53.47 28.71 49.69 36.55 47.62 40.38C47.47 40.66 46.78 40.84 46.5 41"/>
+  <path d="M9.12 39.5C8.94 39.75 8.44 40.2 8.38 40.5C8.28 40.93 8.38 41.83 8.5 42.25C8.55 42.42 8.84 42.67 9 42.75C9.23 42.87 9.74 43 10 43C18.72 43.06 36.16 43.12 44.88 43C45.24 42.99 46.02 42.78 46.25 42.5C46.49 42.2 46.44 41.38 46.5 41"/>
+  <path d="M9.12 39.5C18.31 39.53 36.69 39.59 45.88 39.62"/>
+  <path d="M45.88 39.62C46.03 39.97 46.34 40.66 46.5 41"/>
+</svg>

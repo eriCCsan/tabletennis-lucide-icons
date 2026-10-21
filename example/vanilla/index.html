@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>Table-tennis icons</title>
+    <link rel="stylesheet" href="/example/style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Table-tennis icons</h1>
+      <form id="controls">
+        <label>Size <input id="size" type="range" min="16" max="96" step="any" /><output for="size"></output></label>
+        <label>Color <input id="color" type="text" aria-label="Icon color" /></label>
+        <label>Stroke <input id="stroke" type="range" min="0" max="4" step="any" /><output for="stroke"></output></label>
+        <label><input id="absolute" type="checkbox" /> Absolute stroke width</label>
+        <label>Background <select id="background"><option value="light">Light</option><option value="dark">Dark</option></select></label>
+      </form>
+      <p id="status">25 original icons. Adjust the controls to inspect outlines and filled details.</p>
+      <div id="icons"></div>
+    </main>
+    <script type="module" src="/example/vanilla/main.js"></script>
+  </body>
+</html>

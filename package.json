@@ -1,0 +1,90 @@
+{
+  "name": "tabletennis-lucide-icons",
+  "version": "0.1.0",
+  "description": "Minimal Lucide-style table-tennis SVG icons for React, React Native and vanilla JavaScript.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eriCCsan/tabletennis-lucide-icons.git"
+  },
+  "keywords": [
+    "table-tennis",
+    "icons",
+    "svg",
+    "lucide",
+    "react",
+    "react-native",
+    "expo",
+    "vanilla"
+  ],
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.js"
+    },
+    "./react-native": {
+      "types": "./dist/react-native/index.d.ts",
+      "import": "./dist/react-native/index.js"
+    },
+    "./vanilla": {
+      "types": "./dist/vanilla/index.d.ts",
+      "import": "./dist/vanilla/index.js"
+    },
+    "./icons/*": "./dist/icons/*",
+    "./sprite.svg": "./dist/sprite.svg",
+    "./sheet.svg": "./dist/sheet.svg",
+    "./sheet.png": "./dist/sheet.png"
+  },
+  "scripts": {
+    "check": "node scripts/check.mjs",
+    "build": "node scripts/build.mjs",
+    "example-vanilla": "node scripts/example.mjs vanilla",
+    "example-react": "node scripts/example.mjs react",
+    "lint": "biome ci --error-on-warnings ."
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "peerDependencies": {
+    "react": ">=18.2.0 <20",
+    "react-native": ">=0.76.0 <1",
+    "react-native-svg": ">=15.8.0 <16"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-native": {
+      "optional": true
+    },
+    "react-native-svg": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "0.18.5",
+    "@biomejs/biome": "2.5.15",
+    "@resvg/resvg-js": "2.6.2",
+    "@types/node": "26.6.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "esbuild": "0.28.2",
+    "playwright": "1.64.1",
+    "publint": "0.3.25",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-native": "0.88.0",
+    "react-native-svg": "15.16.0",
+    "saxes": "6.0.0",
+    "svgo": "4.1.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.4"
+  }
+}

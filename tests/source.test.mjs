@@ -1,0 +1,156 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+import { Resvg } from "@resvg/resvg-js";
+import { assetSvg, catalog, parseSvg } from "../scripts/catalog.mjs";
+import { strokeWidthFor as computeStrokeWidth } from "../src/core.ts";
+import { createIcon } from "../src/react.ts";
+import { defaults, names } from "./helpers.mjs";
+
+const strokeWidthFor = (options) => computeStrokeWidth(options, defaults);
+
+const icons = await catalog();
+const hashes = [
+  "8bcd8e32018f66c6a4df8b534c55deda04650d6331f3b8e2e0c0adca9bf6230f",
+  "2f51732bdd3dbdf853b005ab49887c4d16758c64042fcb5a1a62b52888f2b0d3",
+  "2b73224ff35f882c3ff968649188e28727a21006714f9d1aad4588d30f13fef2",
+  "775f76026dc5c70518961e4d70fa2cac28043a6928c9c84e2e27f4e1b33a0774",
+  "f2e32881ec774d76b46e47227eee6022f0320e99429f00a321d7e331e6cd0324",
+  "76297b235f43bcf17dc7d8a764a08a29c2162495480b5ae6f89cb4eb51ba904b",
+  "634741ab53a20eaf1549f4ce726a0b2d6361c1202fd72ce98aecfde7bab22a91",
+  "2e2cf1559835b498a681a867c83406981d8049263beb0e0a14da5b058ee573b3",
+  "23b4a44fcf0d58327dd9060e90d927a8b6b1a86353990a639ec7d1d24a28f064",
+  "86e7833f351fecea153cecfefebaed993c8f69a1ac3c41d7f74d7cbab7734bdd",
+  "e74ad73dba408253baf1652b1b11d57422c8f89def666ae35d64851ac7de3166",
+  "4861be7c047bd8e7d96735246832ec4bb3547a5641023dd244152851fbaec51c",
+  "41ae1ef5f9511a4dd20146be97af4cd9e3f8d029c9b5a09178918624a608682a",
+  "1d3d55460aeb883ae7945b245c65048b17b235120bbebe01a24ae0fef3fd289f",
+  "7b96e3e72f05daa826c365b37aa7b6567a2858505a3e3b1fbe75efc2a2aebd02",
+  "2d06ef29958010060dbf5ef2557089a672c633d0f4e968f45c12a2d39f604701",
+  "f3c9e5f7971d287edcf758c374f2f9714d5f675e3b9b8d31fee05626958e8ec0",
+  "08722ea6c6768882c1944b0f26bfdbe12cedc68d122c605c594e92bf467a4060",
+  "528a45fcb200b71727fecba8f9e84353fdb2f59f7d6b60a6b48f6f58b9900fe8",
+  "56b4908cbe6c80332c93c8252bf25b29c2a14ccda0c14d1bfdc322df2e938624",
+  "f3b67a756c833e46df348f8b15e893a43e9154bfef189711b8a1d40bdbd35bf4",
+  "d56200ad4e1d6df0b81fbdb2d6f037c27d2030852531f6c943256dd7ee4824ac",
+  "8f9cb4836b30dae5d7183034c407b0eb0811aa915fd35db27bfc3d58159ce243",
+  "35688ed51f467d582ead89773bc2647373e4ba732bb1c61f524f78c8a0696e9a",
+  "43f88d6a4f9d992318eef1d1f72bca2a1d07e678ff5ac0d1a4cd3f7dd6f94e73",
+];
+
+test("exact original catalog and source hashes", () => {
+  assert.deepEqual(
+    icons.map(({ name }) => name),
+    names,
+  );
+  assert.deepEqual(
+    icons.map(({ hash }) => hash),
+    hashes,
+  );
+  for (const icon of icons)
+    assert.equal(createIcon(icon.name, icon.nodes, defaults).displayName, icon.name);
+});
+
+for (const icon of icons) {
+  test(`${icon.name}: safe XML and faithful 24px raster`, () => {
+    const reference = icon.source
+      .replace('width="64" height="64"', 'width="24" height="24"')
+      .replace('stroke-width="2"', `stroke-width="${(defaults.strokeWidth * 64) / 24}"`);
+    const original = new Resvg(reference, { font: { loadSystemFonts: false } }).render();
+    const generated = new Resvg(
+      assetSvg(icon, {
+        ...defaults,
+        size: 24,
+        color: "currentColor",
+        absoluteStrokeWidth: false,
+      }),
+      { font: { loadSystemFonts: false } },
+    ).render();
+    assert.equal(generated.width, 24);
+    assert.equal(generated.height, 24);
+    assert.deepEqual(generated.pixels, original.pixels);
+    assert(generated.pixels.some((value, index) => index % 4 === 3 && value > 0));
+  });
+}
+
+for (const [name, fragment] of [
+  ["external use", '<use href="https://example.com/icon.svg"/>'],
+  ["raster image", '<image href="data:image/png;base64,AAAA"/>'],
+  ["script", "<script>alert(1)</script>"],
+  ["event handler", '<path d="M0 0L1 1" onclick="alert(1)"/>'],
+  ["external paint", '<path d="M0 0L1 1" fill="url(https://example.com)"/>'],
+  ["foreign content", "<foreignObject/>"],
+  ["wrong namespace", '<path xmlns="https://example.com" d="M0 0L1 1"/>'],
+  ["missing circle radius", '<circle cx="2" cy="2"/>'],
+  ["empty path", '<path d=""/>'],
+]) {
+  test(`reject ${name}`, () => {
+    const svg = icons[0].source.replace(/<path[^>]*\/>/, fragment);
+    assert.throws(() => parseSvg(svg));
+  });
+}
+
+test("reject DTD, entities and malformed XML", () => {
+  for (const source of [
+    `<!DOCTYPE svg [<!ENTITY x SYSTEM "file:///etc/passwd">]>${icons[0].source}`,
+    icons[0].source.replace("</svg>", ""),
+    icons[0].source.replace("</svg>", "&unknown;</svg>"),
+    icons[0].source.replace('width="64"', 'width="24"'),
+  ])
+    assert.throws(() => parseSvg(source));
+});
+
+test("nominal and absolute stroke widths", () => {
+  assert.equal(defaults.strokeWidth, 0.75);
+  assert.equal(strokeWidthFor({}), 2);
+  assert.equal((strokeWidthFor({}) * 24) / 64, 0.75);
+  assert.equal((strokeWidthFor({ size: 48 }) * 48) / 64, 1.5);
+  assert.equal((strokeWidthFor({ size: 48, absoluteStrokeWidth: true }) * 48) / 64, 0.75);
+  assert.equal(strokeWidthFor({ size: 48, nonScalingStroke: true }), 0.75);
+  assert.equal(strokeWidthFor({ strokeWidth: 2 }), (2 * 64) / 24);
+  assert.equal(strokeWidthFor({ size: "48", strokeWidth: "3", absoluteStrokeWidth: true }), 4);
+  assert.equal(strokeWidthFor({ strokeWidth: 0 }), 0);
+  for (const strokeWidth of [-1, NaN, Infinity, "bad"]) {
+    assert.throws(() => strokeWidthFor({ strokeWidth }), RangeError);
+  }
+  for (const size of [0, -1, Infinity, "2em", "100%", ""]) {
+    assert.throws(() => strokeWidthFor({ size, absoluteStrokeWidth: true }), RangeError);
+  }
+});
+
+test("optional peers and publishing boundary", async () => {
+  const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(pkg.name, "tabletennis-lucide-icons");
+  assert.equal(pkg.version, "0.1.0");
+  assert.equal(pkg.license, "Apache-2.0");
+  assert.equal(pkg.sideEffects, false);
+  assert.equal(pkg.dependencies, undefined);
+  assert.deepEqual(Object.keys(pkg.peerDependenciesMeta).sort(), [
+    "react",
+    "react-native",
+    "react-native-svg",
+  ]);
+  for (const peer of Object.values(pkg.peerDependenciesMeta)) assert.equal(peer.optional, true);
+  for (const forbidden of [
+    "release",
+    "publish",
+    "prepublishOnly",
+    "prepack",
+    "prepare",
+    "postinstall",
+  ]) {
+    assert.equal(pkg.scripts[forbidden], undefined);
+  }
+});
+
+test("README commands exist and documentation stays version/count independent", async () => {
+  const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+  const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  for (const [, command] of readme.matchAll(/npm run ([\w-]+)/g)) {
+    assert(Object.hasOwn(pkg.scripts, command), `Undocumented script: ${command}`);
+  }
+  assert.doesNotMatch(readme, /\b\d+\.\d+\.\d+\b/);
+  assert.doesNotMatch(readme, /\b\d+\s+(?:original\s+)?(?:table-tennis\s+)?icons\b/i);
+  assert.doesNotMatch(readme, /^## (?:Icon catalog|Build configuration|Local development)$/im);
+  assert.match(readme, /\| `strokeWidth` \| `0\.75` \|/);
+});

@@ -1,0 +1,17 @@
+{
+  "defaults": {
+    "size": 24,
+    "color": "currentColor",
+    "strokeWidth": 0.75,
+    "absoluteStrokeWidth": false
+  },
+  "sheet": {
+    "iconSize": 48,
+    "strokeWidth": 0.75,
+    "color": "#000000",
+    "background": "#ffffff"
+  },
+  "example": {
+    "theme": "light"
+  }
+}

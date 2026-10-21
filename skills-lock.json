@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "skills": {
+    "node-lint": {
+      "source": "Paldom/node-skills",
+      "sourceType": "github",
+      "skillPath": "skills/node-lint/SKILL.md",
+      "computedHash": "ac682b20d1e5cbbf32d83a5c91e15fca2b40420b6d20418997f8ea06c827cc69"
+    },
+    "node-packaging": {
+      "source": "Paldom/node-skills",
+      "sourceType": "github",
+      "skillPath": "skills/node-packaging/SKILL.md",
+      "computedHash": "96a7f51e2144a6726597328fe38e5499a6071aefbc892858a1a3106a8fedb890"
+    },
+    "node-release": {
+      "source": "Paldom/node-skills",
+      "sourceType": "github",
+      "skillPath": "skills/node-release/SKILL.md",
+      "computedHash": "72f3aa7ab968e3cfe5b21014283200f7e7144acc47d87cda896306d76148f0c4"
+    },
+    "node-supply-chain": {
+      "source": "Paldom/node-skills",
+      "sourceType": "github",
+      "skillPath": "skills/node-supply-chain/SKILL.md",
+      "computedHash": "6723765123e5aa9abb70a9ab50e5241039e16840f0855c1113f11219a491bfdb"
+    },
+    "node-testing": {
+      "source": "Paldom/node-skills",
+      "sourceType": "github",
+      "skillPath": "skills/node-testing/SKILL.md",
+      "computedHash": "72762f676b0fef0a5a4536ffae828e2f0f63d9edb4d672adb48e649954cf96f8"
+    },
+    "node-typescript": {
+      "source": "Paldom/node-skills",
+      "sourceType": "github",
+      "skillPath": "skills/node-typescript/SKILL.md",
+      "computedHash": "f418c5f654426d6fa49f1e4315817fc64622e8b86b452ee8bfd324462bebd340"
+    }
+  }
+}

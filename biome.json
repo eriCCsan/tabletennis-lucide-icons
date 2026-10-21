@@ -1,0 +1,18 @@
+{
+  "files": {
+    "includes": [
+      "src/**",
+      "scripts/**",
+      "tests/**",
+      "example/**",
+      "!example/react/dist",
+      "package.json",
+      "tsconfig.json",
+      "biome.json",
+      "icons.config.json"
+    ]
+  },
+  "formatter": { "enabled": true, "indentStyle": "space", "lineWidth": 100 },
+  "linter": { "enabled": true, "rules": { "preset": "recommended" } },
+  "assist": { "actions": { "source": { "organizeImports": "on" } } }
+}
