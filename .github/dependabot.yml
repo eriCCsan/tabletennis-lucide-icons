@@ -15,18 +15,3 @@ updates:
         applies-to: version-updates
         patterns: ['*']
         update-types: [minor, patch]
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: weekly
-      day: wednesday
-      time: '09:00'
-      timezone: Europe/Berlin
-    open-pull-requests-limit: 5
-    cooldown:
-      default-days: 7
-    groups:
-      actions-minor-patch:
-        applies-to: version-updates
-        patterns: ['*']
-        update-types: [minor, patch]
