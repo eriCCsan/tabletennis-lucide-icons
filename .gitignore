@@ -71,6 +71,35 @@ web_modules/
 .env.*
 !.env.example
 
+# Local secrets, credentials and private keys
+secrets
+.secrets
+secret.*
+secrets.*
+.secrets.*
+*.secrets.*
+credentials
+.credentials
+credentials.*
+.credentials.*
+*.credentials.*
+.git-credentials
+.netrc
+.pypirc
+.htpasswd
+*.key
+*.pem
+*.p12
+*.pfx
+*.keystore
+*.jks
+id_rsa
+id_dsa
+id_ecdsa
+id_ecdsa_sk
+id_ed25519
+id_ed25519_sk
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache
