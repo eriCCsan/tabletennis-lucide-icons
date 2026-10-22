@@ -4,6 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { preview } from "vite";
 import { root } from "../scripts/catalog.mjs";
+import { waitForExample } from "./example-start.mjs";
 import { browser, config, names } from "./helpers.mjs";
 
 async function startExample(script, t) {
@@ -15,38 +16,28 @@ async function startExample(script, t) {
     stdio: ["ignore", "pipe", "pipe"],
   });
   t.after(async () => {
-    if (child.exitCode !== null || child.signalCode !== null) return;
-    const closed = new Promise((resolve) => child.once("close", resolve));
-    try {
-      if (grouped) process.kill(-child.pid, "SIGTERM");
-      else child.kill("SIGTERM");
-    } catch (error) {
-      if (error.code !== "ESRCH") throw error;
-    }
-    if (child.exitCode === null) await closed;
-  });
-  return new Promise((resolve, reject) => {
-    let log = "";
-    const timer = setTimeout(() => reject(new Error(`Example startup timed out:\n${log}`)), 30000);
-    const receive = (data) => {
-      log += data;
-      const url = log.match(/http:\/\/127\.0\.0\.1:\d+/)?.[0];
-      if (url) {
-        clearTimeout(timer);
-        resolve(url);
+    const closed =
+      child.exitCode !== null || child.signalCode !== null
+        ? Promise.resolve()
+        : new Promise((resolve) => child.once("close", resolve));
+    function kill(signal) {
+      try {
+        if (grouped && child.pid) process.kill(-child.pid, signal);
+        else child.kill(signal);
+      } catch (error) {
+        if (error.code !== "ESRCH") throw error;
       }
-    };
-    child.stdout.on("data", receive);
-    child.stderr.on("data", receive);
-    child.once("error", (error) => {
+    }
+    kill("SIGTERM");
+    const timer = setTimeout(() => kill("SIGKILL"), 5000);
+    try {
+      await closed;
+    } finally {
       clearTimeout(timer);
-      reject(error);
-    });
-    child.once("close", (code) => {
-      clearTimeout(timer);
-      reject(new Error(`Example exited (${code}):\n${log}`));
-    });
+      if (grouped) kill("SIGKILL");
+    }
   });
+  return waitForExample(child);
 }
 
 async function exercise(page, url, react) {
@@ -90,7 +81,7 @@ test("both npm example commands start and render all 25 icons with working contr
   t.after(() => instance.close());
   for (const platform of ["vanilla", "react"]) {
     await t.test(platform, async (t) => {
-      const url = await startExample(`example-${platform}`, t);
+      const url = await startExample(`example:${platform}`, t);
       const page = await instance.newPage();
       t.after(() => page.close());
       await exercise(page, url, platform === "react");

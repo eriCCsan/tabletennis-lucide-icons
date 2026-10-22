@@ -121,7 +121,10 @@ test("nominal and absolute stroke widths", () => {
 test("optional peers and publishing boundary", async () => {
   const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(pkg.name, "tabletennis-lucide-icons");
-  assert.equal(pkg.version, "0.1.0");
+  assert.match(pkg.version, /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/);
+  const lock = JSON.parse(await readFile(new URL("../package-lock.json", import.meta.url), "utf8"));
+  assert.equal(lock.version, pkg.version);
+  assert.equal(lock.packages[""].version, pkg.version);
   assert.equal(pkg.license, "Apache-2.0");
   assert.equal(pkg.sideEffects, false);
   assert.equal(pkg.dependencies, undefined);
@@ -131,22 +134,17 @@ test("optional peers and publishing boundary", async () => {
     "react-native-svg",
   ]);
   for (const peer of Object.values(pkg.peerDependenciesMeta)) assert.equal(peer.optional, true);
-  for (const forbidden of [
-    "release",
-    "publish",
-    "prepublishOnly",
-    "prepack",
-    "prepare",
-    "postinstall",
-  ]) {
+  for (const forbidden of ["publish", "prepublishOnly", "prepack", "prepare", "postinstall"]) {
     assert.equal(pkg.scripts[forbidden], undefined);
   }
+  assert.equal(pkg.scripts.release, "node scripts/release.mjs");
+  assert.equal(pkg.scripts["release:dry-run"], "node scripts/release.mjs --dry-run");
 });
 
 test("README commands exist and documentation stays version/count independent", async () => {
   const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
   const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
-  for (const [, command] of readme.matchAll(/npm run ([\w-]+)/g)) {
+  for (const [, command] of readme.matchAll(/npm run ([\w:-]+)/g)) {
     assert(Object.hasOwn(pkg.scripts, command), `Undocumented script: ${command}`);
   }
   assert.doesNotMatch(readme, /\b\d+\.\d+\.\d+\b/);

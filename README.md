@@ -184,8 +184,8 @@ Browser checks require Playwright Chromium
 Start either example from the repository root:
 
 ```sh
-npm run example-react
-npm run example-vanilla
+npm run example:react
+npm run example:vanilla
 ```
 
 The examples display the available icons and provide size, color, stroke and theme
@@ -197,8 +197,35 @@ Review `icons.config.json` before building: `defaults` controls library props,
 `sheet` controls preview rendering, and `example` controls the initial theme.
 Explicit icon props override library defaults. Rebuild after configuration changes.
 
-`npm run build` validates and creates a locally inspected package in `artifacts/`.
-It does not publish. Release automation is not implemented.
+`npm run build` validates and creates a locally inspected package in `artifacts/`;
+it does not publish.
+
+```sh
+npm run release:dry-run
+npm run release
+```
+
+Install GitHub CLI (`gh`) and use `gh auth login` and `npm login` first. Releases
+require an interactive terminal, a clean `main` synchronized with `origin/main`,
+npm publishing 2FA (`auth-and-writes`), and permission to push and publish. Missing
+GitHub authentication can also be established through an explicitly approved browser
+login during a release.
+
+Conventional Commits determine the next version: `fix:` is a patch, `feat:` a minor,
+and `!` or `BREAKING CHANGE` a major. The initial release retains the manifest
+version. Commits without release-relevant changes do not create a new version.
+
+Dry runs validate a temporary copy without publishing or changing Git references.
+Missing remote/authentication checks are reported and cause a nonzero exit.
+Real releases require explicit preparation and publication confirmations; npm
+handles interactive 2FA/passkey approval. Review dependency security findings before
+confirming. Local publishing does not generate CI provenance.
+
+After a failure, fix the reported prerequisite and rerun `npm run release` to resume
+the same version. Recovery metadata and the checked tarball remain under Git's
+administrative directory. Do not delete that state, rewrite history or remove tags
+to retry. Published artifacts are verified and never blindly republished; conflicting
+state requires manual investigation. No automatic rollback is performed.
 
 ## License
 

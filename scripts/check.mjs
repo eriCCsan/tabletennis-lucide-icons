@@ -12,4 +12,6 @@ await run(process.execPath, [
   "tests/config.test.mjs",
   "tests/browser.test.mjs",
   "tests/ensure-build.test.mjs",
+  "tests/example-start.test.mjs",
+  "tests/release.test.mjs",
 ]);

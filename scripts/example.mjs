@@ -7,7 +7,7 @@ import { exampleServer, listen } from "./server.mjs";
 
 const platform = process.argv[2];
 if (platform !== "vanilla" && platform !== "react")
-  throw new Error("Choose example-vanilla or example-react");
+  throw new Error("Choose example:vanilla or example:react");
 const config = await loadConfig();
 if (await buildRequired()) {
   console.log("Library artifacts are missing or outdated; building first.");

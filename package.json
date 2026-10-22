@@ -45,8 +45,10 @@
   "scripts": {
     "check": "node scripts/check.mjs",
     "build": "node scripts/build.mjs",
-    "example-vanilla": "node scripts/example.mjs vanilla",
-    "example-react": "node scripts/example.mjs react",
+    "example:vanilla": "node scripts/example.mjs vanilla",
+    "example:react": "node scripts/example.mjs react",
+    "release": "node scripts/release.mjs",
+    "release:dry-run": "node scripts/release.mjs --dry-run",
     "lint": "biome ci --error-on-warnings ."
   },
   "engines": {
@@ -71,6 +73,7 @@
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",
     "@biomejs/biome": "2.5.15",
+    "@release-it/conventional-changelog": "12.0.2",
     "@resvg/resvg-js": "2.6.2",
     "@types/node": "26.6.5",
     "@types/react": "19.3.0",
@@ -82,6 +85,7 @@
     "react-dom": "19.3.1",
     "react-native": "0.88.0",
     "react-native-svg": "15.16.0",
+    "release-it": "21.1.1",
     "saxes": "6.0.0",
     "svgo": "4.1.0",
     "typescript": "7.0.2",

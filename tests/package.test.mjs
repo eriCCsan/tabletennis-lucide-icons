@@ -80,7 +80,8 @@ test("actual tarball contents, optional peer isolation and standalone vanilla im
   const installed = JSON.parse(
     await readFile(join(directory, "node_modules/tabletennis-lucide-icons/package.json"), "utf8"),
   );
-  assert.equal(installed.version, "0.1.0");
+  const source = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+  assert.equal(installed.version, source.version);
 });
 
 test("packed declaration resolution with NodeNext and bundler consumers", async (t) => {
