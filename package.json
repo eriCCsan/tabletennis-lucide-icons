@@ -1,6 +1,6 @@
 {
   "name": "tabletennis-lucide-icons",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Minimal Lucide-style table-tennis SVG icons for React, React Native and vanilla JavaScript.",
   "type": "module",
   "license": "Apache-2.0",
