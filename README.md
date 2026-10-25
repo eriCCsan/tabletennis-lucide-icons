@@ -114,11 +114,7 @@ Web icons without an accessible label are decorative.
 
 ## How to Add SVGs
 
-Run all commands below from this repository's root. First run `npm ci`.
-
-### SVG requirements
-
-Use this exact outer SVG structure and replace the path with your artwork:
+Run `npm ci` once in the repository root. Use this SVG template for your artwork:
 
 ```svg
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" color="#000000" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -126,70 +122,44 @@ Use this exact outer SVG structure and replace the path with your artwork:
 </svg>
 ```
 
-- Draw in a **64 × 64** coordinate system; changing only `viewBox` does not resize artwork.
-- Place shapes directly inside `<svg>`. Use at least one `<path>`; additional
-  `<path>` and `<circle>` elements are supported. Convert other shapes and flatten
-  groups/transforms before saving.
-- Paths accept `d`, `fill`, `stroke` and `fill-rule="evenodd"`. Circles accept
-  `cx`, `cy`, a positive `r`, `fill` and `stroke`.
-- Shape colors must be `currentColor` or `none`. For filled details, use
-  `fill="currentColor" stroke="none"`.
-- Remove styles, IDs, editor metadata, XML declarations, comments, scripts,
-  images, external references, masks and clipping paths.
+- Draw at **64 × 64** and keep the template's root attributes, including
+  `stroke-width="2"`. The build applies the library's display stroke default.
+- Put only `<path>` and `<circle>` shapes directly inside `<svg>`. Use
+  `currentColor` or `none` for fills and strokes; filled details can use
+  `fill="currentColor" stroke="none"`. Circles need `cx`, `cy` and a positive `r`;
+  paths need `d` and may use `fill-rule="evenodd"`.
+- Flatten groups and transforms. Remove styles, IDs, metadata, comments, XML
+  declarations, images, scripts, external references, masks and clipping paths.
 
-Keep `stroke-width="2"` in the source template. The library's display default
-of `0.75` is applied during generation, accounting for the viewBox.
-
-### Add and verify the icon
-
-1. **Save the file in `icons/`.** Use the next consecutive number, a hyphen and
-   a lowercase hyphen-separated name: `NN-your-icon.svg`. Do not rename or edit
-   existing SVGs. The generated export will be `YourIcon`.
-2. **Update the expected file count.** In `scripts/catalog.mjs`, find
-   `assert.equal(files.length, ...)`. Its second argument is the expected total
-   number of SVG files, not an icon ID. Increase that number by one for each new
-   file and update the number in its error message. This is only a completeness
-   check; you do not register icons or add imports here.
-3. **Get the generated name and checksum.** Run:
+1. **Add one SVG to `icons/`.** Use the next consecutive number and a lowercase,
+   hyphen-separated name: `NN-your-icon.svg`. Its export becomes `YourIcon`.
+2. **Record its checksum.** For the newly appended icon, run:
 
    ```sh
-   node --input-type=module -e 'import { catalog } from "./scripts/catalog.mjs"; for (const { file, name, hash } of await catalog()) console.log(file, name, hash)'
+   node --input-type=module -e 'import { catalog } from "./scripts/catalog.mjs"; console.log(JSON.stringify((await catalog()).at(-1).hash) + ",")'
    ```
 
-   Find your file's output line. Append its `name` as a quoted string to the
-   `names` array in `tests/helpers.mjs`, and its `hash` as a quoted string to the
-   `hashes` array in `tests/source.test.mjs`. Keep the same numbered-file order
-   and leave existing names/checksums unchanged.
-4. **Update the tests that count icons.** In `tests/built.test.mjs` and
-   `tests/examples.test.mjs`, increase the expected totals in SVG/card count
-   assertions and `figure:nth-child(...)` selectors to the new file total.
-   Do not change dimensions, colors or stroke expectations. In the sheet test in
-   `tests/built.test.mjs`, make the expected height follow the number of rows:
+   In `tests/source.test.mjs`, find `const hashes = [` and paste the output
+   after the last checksum, before `];`. This protects the source artwork from
+   accidental changes. Leave existing checksums unchanged.
+3. **Run `npm run build`.** It runs all checks and generates the library, SVGs,
+   sprite and sheets. Names, exports and examples update automatically.
 
-   ```text
-   const height = Math.ceil(icons.length / 5) * (config.sheet.iconSize + 64);
-   ```
-
-   Remove or update any fixed icon-count text in the two example pages as well.
-5. **Check and build.** Run `npm run check`, then `npm run build`. Both must pass.
-   The build creates the platform exports, SVG assets, sprite and sheets
-   automatically; never edit `dist/` by hand.
-6. **Inspect the result.** Start an example below, find `YourIcon`, and try
-   different sizes, colors and strokes before committing your changes.
+Repeat these steps one SVG at a time when adding multiple icons.
 
 ## Examples
 
-Browser checks require Playwright Chromium
-(`npx --no-install playwright install chromium`) or system Google Chrome.
-Start either example from the repository root:
+Start either example from the repository root to inspect icons at different sizes,
+colors and strokes:
 
 ```sh
 npm run example:react
 npm run example:vanilla
 ```
 
-The examples display the available icons and provide size, color, stroke and theme
-controls. Each command builds missing or outdated library output before serving.
+Both include light/dark backgrounds and build missing or outdated library output.
+Browser tests require Playwright Chromium
+(`npx --no-install playwright install chromium`) or system Google Chrome.
 
 ## Release
 
