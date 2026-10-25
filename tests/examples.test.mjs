@@ -47,26 +47,30 @@ async function exercise(page, url, react) {
     if (message.type() === "error") errors.push(message.text());
   });
   await page.goto(url);
-  await page.waitForSelector("#icons figure:nth-child(25)");
+  await page.waitForSelector(`#icons figure:nth-child(${names.length})`);
   assert.deepEqual((await page.locator("figcaption").allTextContents()).sort(), [...names].sort());
-  assert.equal(await page.locator("#icons svg").count(), 25);
+  assert.equal(await page.locator("#icons svg").count(), names.length);
   assert.equal(await page.locator("#size").inputValue(), String(config.defaults.size));
   assert.equal(await page.locator("#color").inputValue(), config.defaults.color);
   assert.equal(await page.locator("#stroke").inputValue(), String(config.defaults.strokeWidth));
-  assert.equal(await page.locator('#icons svg[width="24"][stroke-width="2"]').count(), 25);
+  assert.equal(
+    await page.locator('#icons svg[width="24"][stroke-width="2"]').count(),
+    names.length,
+  );
   await page.locator("#size").fill("48");
   await page.locator("#stroke").fill("3");
   await page.locator("#color").fill("#ff0000");
   const width = (3 * 64) / (config.defaults.absoluteStrokeWidth ? 48 : 24);
   assert.equal(
     await page.locator(`#icons svg[width="48"][height="48"][stroke-width="${width}"]`).count(),
-    25,
+    names.length,
   );
   const colors = await page
     .locator("#icons svg")
     .evaluateAll((elements) => elements.map((element) => getComputedStyle(element).color));
   assert(colors.every((color) => color === "rgb(255, 0, 0)"));
-  if (react) assert.equal(await page.locator('#icons svg.icon[color="currentColor"]').count(), 25);
+  if (react)
+    assert.equal(await page.locator('#icons svg.icon[color="currentColor"]').count(), names.length);
   await page.locator("#background").selectOption("dark");
   assert.equal(await page.locator('[data-background="dark"]').count(), 1);
   await page.locator("#background").selectOption("light");
@@ -76,7 +80,7 @@ async function exercise(page, url, react) {
   assert.deepEqual(errors, []);
 }
 
-test("both npm example commands start and render all 25 icons with working controls", async (t) => {
+test("both npm example commands start and render every catalog icon with working controls", async (t) => {
   const instance = await browser();
   t.after(() => instance.close());
   for (const platform of ["vanilla", "react"]) {

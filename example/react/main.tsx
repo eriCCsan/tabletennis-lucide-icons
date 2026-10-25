@@ -71,7 +71,7 @@ function App() {
             </select>
           </label>
         </form>
-        <p>25 original icons. Adjust the controls to inspect outlines and filled details.</p>
+        <p>Adjust the controls to inspect icon outlines and filled details.</p>
         <div id="icons" style={{ color }}>
           {Object.entries(icons).map(([name, Icon], index) => (
             <figure key={name}>

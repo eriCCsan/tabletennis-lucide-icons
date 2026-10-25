@@ -2,39 +2,14 @@ import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { build } from "esbuild";
 import { chromium } from "playwright";
+import { catalog } from "../scripts/catalog.mjs";
 import { loadConfig } from "../scripts/config.ts";
 import { listen } from "../scripts/server.mjs";
 
 export const config = await loadConfig();
 export const defaults = config.defaults;
 
-export const names = [
-  "Paddle",
-  "Ball",
-  "PaddlePair",
-  "Table",
-  "BallOverNet",
-  "Topspin",
-  "Backspin",
-  "Sidespin",
-  "FastBall",
-  "Serve",
-  "Direction",
-  "Irregular",
-  "Player",
-  "WinnerPose",
-  "Trophy",
-  "Podium",
-  "Medal",
-  "Umpire",
-  "BallRobot",
-  "BallBasket",
-  "Rubber",
-  "Wood",
-  "PipsRubber",
-  "Scoreboard",
-  "PlayerInAction",
-];
+export const names = (await catalog()).map(({ name }) => name);
 
 export async function browser() {
   // macOS 13 cannot run current bundled Chromium; a locally installed Chrome still can.

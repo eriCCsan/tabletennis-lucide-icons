@@ -90,7 +90,7 @@ export function parseSvg(source) {
 
 export async function catalog(directory = new URL("../icons/", import.meta.url)) {
   const files = (await readdir(directory)).filter((file) => file.endsWith(".svg")).sort();
-  assert.equal(files.length, 25, "Expected exactly 25 original SVGs");
+  assert(files.length > 0, "At least one icon SVG is required");
   return Promise.all(
     files.map(async (file, index) => {
       assert(file.startsWith(`${String(index + 1).padStart(2, "0")}-`), "Invalid icon numbering");

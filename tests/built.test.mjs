@@ -62,9 +62,17 @@ test("built modules tree-shake every unused icon and isolate platform peers", as
     });
     const output = result.outputFiles[0].text;
     assert(output.includes(icons[0].nodes[0][1].d), `${platform}: requested geometry missing`);
+    const usedPaths = new Set(
+      icons[0].nodes.filter(([tag]) => tag === "path").map(([, attributes]) => attributes.d),
+    );
     for (const icon of icons.slice(1)) {
-      const path = icon.nodes.find(([tag]) => tag === "path")[1].d;
-      assert(!output.includes(path), `${platform}: unused ${icon.name} geometry retained`);
+      for (const [, attributes] of icon.nodes.filter(([tag]) => tag === "path")) {
+        if (!usedPaths.has(attributes.d))
+          assert(
+            !output.includes(attributes.d),
+            `${platform}: unused ${icon.name} geometry retained`,
+          );
+      }
     }
     const imports = Object.values(result.metafile.outputs).flatMap(({ imports }) =>
       imports.map(({ path }) => path),
@@ -108,7 +116,7 @@ test("sprite has all symbols; SVG and PNG sheets contain the same rendered image
     assert(sheet.includes(`${index + 1}. ${icon.slug}</text>`));
   const rendered = new Resvg(sheet).render();
   const width = 5 * Math.max(160, config.sheet.iconSize + 32);
-  const height = 5 * (config.sheet.iconSize + 64);
+  const height = Math.ceil(icons.length / 5) * (config.sheet.iconSize + 64);
   assert.equal(rendered.width, width);
   assert.equal(rendered.height, height);
   assert(
@@ -123,7 +131,7 @@ test("sprite has all symbols; SVG and PNG sheets contain the same rendered image
     createHash("sha256").update(rendered.asPng()).digest(),
     createHash("sha256").update(png).digest(),
   );
-  assert.equal((await readdir(new URL("../dist/icons/", import.meta.url))).length, 25);
+  assert.equal((await readdir(new URL("../dist/icons/", import.meta.url))).length, icons.length);
 });
 
 test("actual built React Native modules at the native renderer boundary", async (t) => {
@@ -156,11 +164,11 @@ test("actual built React Native modules at the native renderer boundary", async 
   const result = await page.evaluate(() => globalThis.result);
   assert.deepEqual(result.names.sort(), [...names].sort());
   assert(result.refs);
-  assert.equal(await page.locator('svg[width="24"][stroke-width="2"]').count(), 25);
+  assert.equal(await page.locator('svg[width="24"][stroke-width="2"]').count(), names.length);
   await page.evaluate(() =>
     globalThis.renderNative({ size: 48, strokeWidth: 3, absoluteStrokeWidth: true, color: "red" }),
   );
-  assert.equal(await page.locator('svg[stroke-width="4"][color="red"]').count(), 25);
+  assert.equal(await page.locator('svg[stroke-width="4"][color="red"]').count(), names.length);
   assert.equal(
     await page.locator('[data-name="PipsRubber"] circle[stroke="none"][fill="red"]').count(),
     28,
@@ -185,11 +193,11 @@ test("vanilla example loads actual built modules and all controls work", async (
     if (!response.ok()) errors.push(`${response.status()} ${response.url()}`);
   });
   await page.goto(url);
-  await page.waitForSelector("#icons figure:nth-child(25)");
+  await page.waitForSelector(`#icons figure:nth-child(${names.length})`);
   assert.deepEqual((await page.locator("figcaption").allTextContents()).sort(), [...names].sort());
   assert.equal(
     await page.locator(`#icons svg[width="${defaults.size}"][height="${defaults.size}"]`).count(),
-    25,
+    names.length,
   );
   assert.equal(await page.locator("#size").inputValue(), String(defaults.size));
   assert.equal(await page.locator("#color").inputValue(), defaults.color);
@@ -205,7 +213,7 @@ test("vanilla example loads actual built modules and all controls work", async (
     await page
       .locator('#icons svg[width="48"][height="48"][stroke-width="4"][color="#ff0000"]')
       .count(),
-    25,
+    names.length,
   );
   assert.equal(await page.locator("body").getAttribute("data-background"), "dark");
   await page.locator("#background").selectOption("light");
@@ -235,7 +243,7 @@ test("example restart initializes all controls from current config, even outside
     const url = await listen(server);
     try {
       await page.goto(url);
-      await page.waitForSelector("#icons figure:nth-child(25)");
+      await page.waitForSelector(`#icons figure:nth-child(${names.length})`);
       assert.equal(await page.locator("#size").inputValue(), String(settings.defaults.size));
       assert.equal(await page.locator("#color").inputValue(), settings.defaults.color);
       assert.equal(
@@ -260,10 +268,10 @@ test("example restart initializes all controls from current config, even outside
             `#icons svg[width="${settings.defaults.size}"][color="${settings.defaults.color}"][stroke-width="${width}"]`,
           )
           .count(),
-        25,
+        names.length,
       );
       await page.locator("#color").fill("red");
-      assert.equal(await page.locator('#icons svg[color="red"]').count(), 25);
+      assert.equal(await page.locator('#icons svg[color="red"]').count(), names.length);
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }

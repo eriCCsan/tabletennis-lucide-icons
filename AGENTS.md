@@ -2,7 +2,7 @@
 
 ## Project
 
-`tabletennis-lucide-icons` is a small, Apache-2.0-licensed, Lucide-style table-tennis SVG icon library. The **25 existing original SVGs** in the repository are the single source of truth. Do not re-extract, redraw, rename, or silently modify them.
+`tabletennis-lucide-icons` is a small, Apache-2.0-licensed, Lucide-style table-tennis SVG icon library. The SVG files in `icons/` are the single source of truth. Do not re-extract, redraw, rename, or silently modify them; validate any intentional artwork changes against the existing design.
 
 - Source icons: `viewBox="0 0 64 64"`, initially `stroke-width="2"`; preserve geometry, fills, and appearance. Source size is **not** the display default.
 - Display default: `size=24`, `color=currentColor`, effective visible `strokeWidth=0.75`; also support Lucide-style `absoluteStrokeWidth`. Handle the 64-to-24 coordinate scale deliberately, including filled/non-stroked parts.
@@ -60,7 +60,7 @@ If a skill conflicts with these scope restrictions, apply its relevant technical
 
 ## Testing and verification
 
-- Cover all 25 original SVGs, safe XML, colors/fills, dimensions, exact public exports, TS declarations, React and React Native adapters, vanilla use without React, and actual 24x24 render behavior.
+- Cover all source SVGs, safe XML, colors/fills, dimensions, exact public exports, TS declarations, React and React Native adapters, vanilla use without React, and actual 24x24 render behavior.
 - Test built consumer imports, ESM tree-shaking, generated sprite/sheets, tarball content, package exports, and optional peer dependency isolation. Verify packaging against locally generated artifacts, not mocks only.
 - `check` must work from a clean repository without `dist` and must not generate it; checks requiring built artifacts belong to `build`.
 - Run the smallest checks justified by each code change; run the full gate when requested or preparing a build. Do not rerun unchanged checks unnecessarily.

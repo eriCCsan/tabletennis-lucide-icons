@@ -4,6 +4,8 @@ import { catalog } from "../scripts/catalog.mjs";
 import { browser, defaults, fixture, nativeBoundary } from "./helpers.mjs";
 
 const icons = await catalog();
+const pipsRubberIndex = icons.findIndex(({ name }) => name === "PipsRubber");
+const playerInActionIndex = icons.findIndex(({ name }) => name === "PlayerInAction");
 
 test("browser: React refs, native adapter boundary and vanilla rendering", async (t) => {
   const served = await fixture(
@@ -108,16 +110,18 @@ test("browser: React refs, native adapter boundary and vanilla rendering", async
     }
   });
   await t.test("props, color, absolute stroke and filled parts", async () => {
-    const result = await page.evaluate(() =>
-      globalThis.renderIcon(24, {
-        size: 48,
-        color: "#e11d48",
-        strokeWidth: 3,
-        absoluteStrokeWidth: true,
-        className: "custom",
-        "aria-label": "Player",
-        tabIndex: 0,
-      }),
+    const result = await page.evaluate(
+      (index) =>
+        globalThis.renderIcon(index, {
+          size: 48,
+          color: "#e11d48",
+          strokeWidth: 3,
+          absoluteStrokeWidth: true,
+          className: "custom",
+          "aria-label": "Player",
+          tabIndex: 0,
+        }),
+      playerInActionIndex,
     );
     for (const svg of result.svgs) {
       assert.match(svg, /width="48"/);
@@ -126,13 +130,16 @@ test("browser: React refs, native adapter boundary and vanilla rendering", async
       assert.match(svg, /class="custom"/);
       assert.match(svg, /aria-label="Player"/);
       assert.doesNotMatch(svg, /aria-hidden="true"/);
-      assert.match(svg, /stroke="none"/);
-      assert.match(svg, /fill-rule="evenodd"/);
+      assert.match(
+        svg,
+        /<path[^>]*fill="(?:currentColor|#e11d48)"[^>]*stroke="(?:currentColor|#e11d48)"/,
+      );
     }
     const colors = await page.locator("svg").evaluateAll((svgs) =>
       svgs.map((svg) => ({
         color: getComputedStyle(svg).color,
-        fill: getComputedStyle(svg.querySelector("path")).fill,
+        fill: getComputedStyle(svg.querySelector('path[fill="currentColor"], path[fill="#e11d48"]'))
+          .fill,
       })),
     );
     for (const { color, fill } of colors) {
@@ -145,8 +152,9 @@ test("browser: React refs, native adapter boundary and vanilla rendering", async
       globalThis.renderIcon(0, { size: 48, strokeWidth: 2, absoluteStrokeWidth: false }),
     );
     for (const svg of regular.svgs) assert.match(svg, /stroke-width="5\.333333333333333"/);
-    const zero = await page.evaluate(() =>
-      globalThis.renderIcon(22, { strokeWidth: 0, color: "currentColor" }),
+    const zero = await page.evaluate(
+      (index) => globalThis.renderIcon(index, { strokeWidth: 0, color: "currentColor" }),
+      pipsRubberIndex,
     );
     for (const svg of zero.svgs) {
       assert.match(svg, /stroke-width="0"/);
@@ -240,13 +248,15 @@ test("browser: React refs, native adapter boundary and vanilla rendering", async
         assert.equal(rows, 2);
       }
     }
-    const filled = await page.evaluate(() =>
-      globalThis.renderIcon(22, {
-        size: "2em",
-        strokeWidth: 2,
-        nonScalingStroke: true,
-        color: "currentColor",
-      }),
+    const filled = await page.evaluate(
+      (index) =>
+        globalThis.renderIcon(index, {
+          size: "2em",
+          strokeWidth: 2,
+          nonScalingStroke: true,
+          color: "currentColor",
+        }),
+      pipsRubberIndex,
     );
     for (const svg of filled.svgs) {
       assert.match(svg, /fill="currentColor"/);
