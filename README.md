@@ -184,6 +184,8 @@ login during a release.
 Conventional Commits determine the next version: `fix:` is a patch, `feat:` a minor,
 and `!` or `BREAKING CHANGE` a major. The initial release retains the manifest
 version. Commits without release-relevant changes do not create a new version.
+A committed, unpublished version already set in both manifests is used as the
+release target when it is newer than the verified npm/Git baseline.
 
 Dry runs validate a temporary copy without publishing or changing Git references.
 Missing remote/authentication checks are reported and cause a nonzero exit.

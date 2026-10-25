@@ -6,13 +6,18 @@ export function configureSession(value) {
   session = value;
 }
 
-export function releaseOptions({ initial = false, resume = false, dryRun = false } = {}) {
+export function releaseOptions({
+  initial = false,
+  resume = false,
+  pendingVersion,
+  dryRun = false,
+} = {}) {
   return {
     config: false,
     ci: false,
     quiet: true,
     "dry-run": dryRun,
-    increment: initial || resume ? false : undefined,
+    increment: initial || resume ? false : pendingVersion,
     git: false,
     npm: false,
     github: false,
@@ -52,7 +57,7 @@ export default class LocalRelease extends Plugin {
   }
 
   getLatestVersion() {
-    return session.state?.version ?? session.pkg.version;
+    return session.state?.version ?? session.baselineVersion ?? session.pkg.version;
   }
 
   getChangelog() {

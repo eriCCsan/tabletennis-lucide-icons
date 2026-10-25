@@ -289,7 +289,7 @@ export class ReleaseSession {
     this.initial = this.metadata === null && allTags.length === 0 && !this.state;
     if (!this.state)
       await this.check(
-        "Manifest, npm and release tags must describe the same baseline",
+        "Release baseline must match npm/latest and its Git tag; a newer manifest must be unpublished",
         async () => {
           if (this.initial) {
             requireCondition(
@@ -298,13 +298,43 @@ export class ReleaseSession {
             );
             return;
           }
+          const baseline = this.metadata?.["dist-tags"]?.latest;
           requireCondition(
-            this.metadata?.versions?.[this.pkg.version] &&
-              this.metadata["dist-tags"]?.latest === this.pkg.version &&
-              this.latestTag === `v${this.pkg.version}`,
+            typeof baseline === "string" &&
+              stableVersion.test(baseline) &&
+              this.metadata.versions?.[baseline] &&
+              this.latestTag === `v${baseline}`,
             "Published baseline is inconsistent; investigate manually",
           );
           await this.git(["merge-base", "--is-ancestor", this.latestTag, "HEAD"]);
+          const tagged = json(await this.git(["show", `${this.latestTag}:package.json`]));
+          requireCondition(
+            tagged.name === this.pkg.name && tagged.version === baseline,
+            "Tagged manifest does not match the published baseline",
+          );
+          const lock = json(await readFile(join(this.root, "package-lock.json"), "utf8"));
+          requireCondition(
+            lock.version === this.pkg.version && lock.packages?.[""]?.version === this.pkg.version,
+            "Manifest and lockfile versions must match",
+          );
+          const current = this.pkg.version.split(".").map(BigInt);
+          const previous = baseline.split(".").map(BigInt);
+          const difference = current.findIndex((part, index) => part !== previous[index]);
+          requireCondition(
+            difference === -1 || current[difference] > previous[difference],
+            "Manifest version is older than the published baseline",
+          );
+          this.baselineVersion = baseline;
+          if (difference !== -1) {
+            requireCondition(
+              !this.metadata.versions[this.pkg.version],
+              "Prepared manifest version already exists on npm",
+            );
+            this.pendingVersion = this.pkg.version;
+            this.log(
+              `Published baseline: ${baseline}; prepared release target: ${this.pendingVersion}.`,
+            );
+          }
         },
       );
     if (this.metadata && this.username)
@@ -742,6 +772,7 @@ export async function runRelease(options = {}) {
       releaseOptions({
         initial: session.initial,
         resume: Boolean(session.state),
+        pendingVersion: session.pendingVersion,
         dryRun: session.dryRun,
       }),
     );

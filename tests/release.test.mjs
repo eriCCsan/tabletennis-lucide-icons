@@ -175,6 +175,8 @@ async function harness(t, { dryRun = false } = {}) {
     if (network.fail === "registry") throw new Error("Simulated registry outage");
     const singleVersion = new URL(url).pathname.split("/").length > 2;
     const requestedVersion = new URL(url).pathname.split("/")[2];
+    if (!singleVersion && network.metadata)
+      return { status: 200, ok: true, json: async () => network.metadata };
     const body =
       network.published && (!singleVersion || requestedVersion === network.published.version)
         ? singleVersion
@@ -216,6 +218,95 @@ async function harness(t, { dryRun = false } = {}) {
     };
   };
   return { ...f, network, session, fastPrepare };
+}
+
+async function pendingManifestHarness(t, { dryRun = false, version = "0.1.1" } = {}) {
+  const h = await harness(t, { dryRun });
+  await h.git(["tag", "--annotate", "v0.1.0", "-m", "published baseline"]);
+  h.network.remoteTag = await h.git(["rev-parse", "v0.1.0"]);
+  h.network.tagName = "refs/tags/v0.1.0";
+  h.network.published = { name: h.pkg.name, version: "0.1.0" };
+  for (const file of ["package.json", "package-lock.json"]) {
+    const path = join(h.dir, file);
+    const data = JSON.parse(await readFile(path, "utf8"));
+    data.version = version;
+    if (file === "package-lock.json") data.packages[""].version = version;
+    await writeFile(path, `${JSON.stringify(data, null, 2)}\n`);
+  }
+  await h.git(["add", "package.json", "package-lock.json"]);
+  await h.git(["commit", "-m", "chore: prepare manifest version"]);
+  h.network.remoteHead = await h.git(["rev-parse", "HEAD"]);
+  return h;
+}
+
+for (const dryRun of [true, false]) {
+  test(`pending manifest uses the exact target without double increment (${dryRun ? "dry-run" : "simulated release"})`, async (t) => {
+    const h = await pendingManifestHarness(t, { dryRun });
+    const head = await h.git(["rev-parse", "HEAD"]);
+    const before = await readFile(join(h.dir, "package-lock.json"), "utf8");
+    const cwd = process.cwd();
+    try {
+      process.chdir(h.dir);
+      const session = await runRelease(h.session());
+      assert.equal(session.baselineVersion, "0.1.0");
+      assert.equal(session.pendingVersion, "0.1.1");
+      assert(h.network.logs.some((message) => message.includes("→ 0.1.1")));
+      if (dryRun) {
+        assert.equal(await h.git(["rev-parse", "HEAD"]), head);
+        assert.equal(await h.git(["tag", "--list"]), "v0.1.0");
+        assert.equal(h.network.publishes + h.network.pushes + h.network.posts, 0);
+        await assert.rejects(readFile(session.statePath), { code: "ENOENT" });
+      } else {
+        assert.equal(h.network.published.version, "0.1.1");
+        assert.equal(h.network.publishes, 1);
+        assert.equal(h.network.posts, 1);
+        const releasedHead = await h.git(["rev-parse", "HEAD"]);
+        assert.equal(await h.git(["rev-parse", "v0.1.1^{}"]), releasedHead);
+        await runRelease(h.session());
+        assert.equal(await h.git(["rev-parse", "HEAD"]), releasedHead);
+        assert.equal(h.network.publishes, 1);
+        assert.equal(h.network.posts, 1);
+      }
+      assert.equal(await readFile(join(h.dir, "package-lock.json"), "utf8"), before);
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+}
+
+for (const condition of [
+  "older manifest",
+  "published target",
+  "npm/tag mismatch",
+  "lock mismatch",
+]) {
+  test(`baseline rejects ${condition} before release preparation`, async (t) => {
+    const h = await pendingManifestHarness(t, {
+      version: condition === "older manifest" ? "0.0.9" : "0.1.1",
+    });
+    if (condition === "lock mismatch") {
+      const path = join(h.dir, "package-lock.json");
+      const lock = JSON.parse(await readFile(path, "utf8"));
+      lock.packages[""].version = "0.1.0";
+      await writeFile(path, `${JSON.stringify(lock, null, 2)}\n`);
+      await h.git(["add", "package-lock.json"]);
+      await h.git(["commit", "-m", "chore: fixture lock mismatch"]);
+      h.network.remoteHead = await h.git(["rev-parse", "HEAD"]);
+    }
+    const session = h.session();
+    if (["published target", "npm/tag mismatch"].includes(condition)) {
+      h.network.metadata = {
+        versions: { "0.1.0": {}, "0.1.1": {} },
+        "dist-tags": { latest: condition === "npm/tag mismatch" ? "0.1.1" : "0.1.0" },
+      };
+    }
+    const head = await h.git(["rev-parse", "HEAD"]);
+    await assert.rejects(session.initialize(), /Release baseline/);
+    assert.equal(await h.git(["rev-parse", "HEAD"]), head);
+    assert.equal(await h.git(["tag", "--list"]), "v0.1.0");
+    assert.equal(h.network.publishes + h.network.pushes + h.network.posts, 0);
+    assert.equal(session.prepared, false);
+  });
 }
 
 test("release configuration disables all built-in writers and CLI overrides", async () => {
