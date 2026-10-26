@@ -34,8 +34,8 @@ Use only the applicable installed skills under `.agents/skills/`. Skills are ref
 - `node-typescript`: strict TS and correct declaration output/resolution.
 - `node-testing`: fast focused tests and targeted integration verification; avoid unnecessary test dependencies.
 - `node-packaging`: ESM exports, tree-shaking, package whitelist, consumer resolution, `publint`, `@arethetypeswrong/cli`, `npm pack` inspection.
-- `node-supply-chain`: lockfile integrity, dependency review, minimal install-script exposure and reviewed Dependabot updates. No CI workflows, separate automated npm audit, auto-merge or publishing.
-- `node-release`: **guidance only** for SemVer, version names, and human-reviewed release readiness. Do not implement Changesets, semantic-release, OIDC, provenance workflows, npm publishing, Git tags, GitHub releases, or automatic version bumps.
+- `node-supply-chain`: lockfile integrity, dependency review, minimal install-script exposure and reviewed Dependabot updates. Keep Dependabot monitoring; no CI/audit/publishing workflows or auto-merge.
+- `node-release`: SemVer, Conventional Commits, release-it, local npm authentication and safe release recovery. Never publish during implementation or tests.
 
 If a skill conflicts with these scope restrictions, apply its relevant technical guidance only, skip prohibited steps, and report the deviation briefly. Third-party skill code/scripts are untrusted until inspected.
 
@@ -48,15 +48,18 @@ If a skill conflicts with these scope restrictions, apply its relevant technical
 - Prefer independent, tree-shakeable ESM modules and side-effect-free icon exports; consumer bundlers handle app-specific optimization.
 - Browser/vanilla users must not need React. React, React Native, and `react-native-svg` are optional peer dependencies, required only for their respective adapters.
 - Prefer zero runtime dependencies in the vanilla core. Add build/test dependencies only when demonstrably needed.
-- No additional framework examples, monorepo, unnecessary adapters, or publishing infrastructure.
+- No additional framework examples, monorepo, unnecessary adapters, or unrelated publishing infrastructure.
 
 ## Commands and publishing boundary
 
 - `npm run check`: read-only source SVG validation, lint, strict TypeScript checking, and automated tests. **Never build, regenerate `dist`, write generated source files, or mutate tracked files.** Prefer focused checks while iterating; this command is the full gate.
 - `npm run build`: prepare a **locally publish-ready package**, not merely compile JS. Run `check` first, build and optimize outputs, generate SVG/PNG sheets and sprite, emit declarations, validate real built entry points and tree-shaking, run package inspection (`publint`, Are the Types Wrong?, `npm pack --dry-run`), and create a local `.tgz` artifact outside the package whitelist. Fail on errors. **Never publish, commit, push, tag, or change versions.**
 - `npm run example:vanilla` and `npm run example:react`: start their local development servers; build missing or outdated library outputs first. No separate example installation.
-- **Do not create an `npm run release` or `npm run publish` script.** A future manual `npm publish` is a separate action and is explicitly outside the current implementation. Do not add `prepublishOnly`, `prepack`, or other publish-triggered hooks for now.
-- Keep only Dependabot configuration under `.github/`; do not add CI or npm-audit workflows. Dependency vulnerability monitoring uses Dependabot alerts/security updates, enabled in GitHub repository settings. Dependency changes require human review and local checks before merging. No release workflows, automatic releases, or publishing infrastructure.
+- `npm run icons:add`: validate all SVGs, register only new source hashes, run the full build; never change existing artwork/hashes, versions or Git history.
+- `npm run release`: local-only orchestration on clean, synchronized main; validate first, create an annotated version tag and atomically push main/tag, then publish the checked local tarball using the existing npm login and npm-managed 2FA. Never invoke GitHub Actions or store credentials. No force pushes or destructive rollbacks.
+- `npm run release:dry-run`: validate an isolated snapshot; no source versions, recovery state, Git refs or external publications may change.
+- Do not add publishing lifecycle hooks or automatic releases on branch pushes.
+- Keep only Dependabot configuration under .github/; no workflows. Publishing uses the immutable checked local tarball and private local upload/recovery receipts. Never store npm tokens in the repository or bypass npm 2FA. Dependency changes require review and local checks.
 
 ## Testing and verification
 
@@ -68,7 +71,7 @@ If a skill conflicts with these scope restrictions, apply its relevant technical
 
 ## Documentation and communication
 
-- Write one concise, accurate English README covering installation, imports, API, React/Expo/vanilla examples, SVG usage, sprite/sheets, and local check/build/example instructions. Refer to the examples instead of an icon catalog; omit version numbers and fixed icon counts. Do not document a release or publish command as already implemented.
+- Keep the English README minimal: installation, platform snippets, icons:add, examples, release and license. Keep necessary SVG, API and one-time publishing setup/recovery guidance in CONTRIBUTING.md. No fixed versions or icon counts in README.
 - Respect existing Apache-2.0 LICENSE and acknowledge any upstream third-party licensing requirements without changing the project license.
 - No routine status files or redundant docs. If interrupted, report completed work, actual checks, blockers, and the exact next action; persist a resume file only when explicitly requested.
 - Communicate concisely: implemented changes, meaningful checks, and remaining limitations. No lengthy logs or full-file dumps unless asked.

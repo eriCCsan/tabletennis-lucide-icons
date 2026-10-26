@@ -13,11 +13,12 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { createInterface } from "node:readline/promises";
+import { setTimeout as pause } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import release from "release-it";
 import { configureSession, releaseOptions } from "./release-plugin.mjs";
+import { packResult } from "./run.mjs";
 
 export const registry = "https://registry.npmjs.org/";
 const manifests = ["package.json", "package-lock.json"];
@@ -88,15 +89,6 @@ export async function command(
   });
 }
 
-export async function confirm(message) {
-  const terminal = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    return (await terminal.question(`${message} Type yes to continue [no]: `)).trim() === "yes";
-  } finally {
-    terminal.close();
-  }
-}
-
 async function optionalJson(path) {
   try {
     return json(await readFile(path, "utf8"));
@@ -117,13 +109,13 @@ export class ReleaseSession {
     root = process.cwd(),
     dryRun = false,
     exec = command,
-    ask = confirm,
     request = fetch,
+    pause: wait = pause,
     log = console.log,
-    tty = process.stdin.isTTY && process.stdout.isTTY,
     ci = Boolean(process.env.CI),
+    tty = Boolean(process.stdin.isTTY && process.stdout.isTTY),
   } = {}) {
-    Object.assign(this, { root: resolve(root), dryRun, exec, ask, request, log, tty, ci });
+    Object.assign(this, { root: resolve(root), dryRun, exec, request, pause: wait, log, ci, tty });
     this.issues = [];
     this.prepared = false;
     this.githubAuthenticated = false;
@@ -181,17 +173,18 @@ export class ReleaseSession {
   }
 
   async initialize() {
-    if (!this.dryRun)
-      requireCondition(
-        this.tty && !this.ci,
-        "Real releases require an interactive local terminal, never CI.",
-      );
+    requireCondition(!this.ci || this.dryRun, "Start real releases locally, not from CI.");
     this.pkg = json(await readFile(join(this.root, "package.json"), "utf8"));
     requireCondition(
       stableVersion.test(this.pkg.version) && !this.pkg.private,
       "Expected a public package with a stable version.",
     );
     requireCondition(this.pkg.name === "tabletennis-lucide-icons", "Unexpected package name.");
+    const lock = json(await readFile(join(this.root, "package-lock.json"), "utf8"));
+    requireCondition(
+      lock.version === this.pkg.version && lock.packages?.[""]?.version === this.pkg.version,
+      "Manifest and lockfile versions must match",
+    );
     this.repo = repositoryName(this.pkg.repository.url);
     requireCondition(
       repositoryName(await this.git(["remote", "get-url", "origin"])) === this.repo,
@@ -206,6 +199,23 @@ export class ReleaseSession {
     this.statePath = join(this.stateDir, "state.json");
     this.state = await optionalJson(this.statePath);
     if (this.state) this.validateState();
+    if (this.state && this.state.schema !== 3) {
+      const published = await this.npmMetadata(this.state.version);
+      const released = await this.github(
+        `repos/${this.repo}/releases/tags/v${this.state.version}`,
+        { missing: true },
+      );
+      requireCondition(
+        published?.dist?.integrity === this.state.integrity &&
+          released &&
+          !released.draft &&
+          !released.prerelease &&
+          (await this.git(["rev-parse", `v${this.state.version}^{}`])) === this.state.commit,
+        "Legacy release is incomplete or conflicting; verify the original npm upload and GitHub release before migrating.",
+      );
+      this.completedLegacy = true;
+      this.state = null;
+    }
     await this.check("Branch must be main", async () =>
       requireCondition((await this.git(["branch", "--show-current"])) === "main", "Wrong branch"),
     );
@@ -214,23 +224,9 @@ export class ReleaseSession {
       () => this.checkTree(),
     );
     await this.check("GitHub CLI login required: install gh and run gh auth login", async () => {
-      let status = await this.run("gh", ["auth", "status", "--hostname", "github.com"], {
+      const status = await this.run("gh", ["auth", "status", "--hostname", "github.com"], {
         allowFailure: true,
       });
-      if (
-        status.code !== 0 &&
-        !this.dryRun &&
-        (await this.ask("Sign in to GitHub through your browser?"))
-      ) {
-        await this.run(
-          "gh",
-          ["auth", "login", "--hostname", "github.com", "--web", "--git-protocol", "https"],
-          { interactive: true },
-        );
-        status = await this.run("gh", ["auth", "status", "--hostname", "github.com"], {
-          allowFailure: true,
-        });
-      }
       requireCondition(status.code === 0, "GitHub authentication failed");
       this.githubAuthenticated = true;
     });
@@ -256,30 +252,6 @@ export class ReleaseSession {
         );
       },
     );
-    await this.check(
-      "npm must use the public registry and an existing local login (npm login)",
-      async () => {
-        requireCondition(
-          (await this.run("npm", ["config", "get", "registry"])).stdout.trim() === registry,
-          "Unexpected npm registry",
-        );
-        requireCondition(
-          !this.pkg.publishConfig?.registry || this.pkg.publishConfig.registry === registry,
-          "Unexpected publish registry",
-        );
-        this.username = (await this.run("npm", ["whoami", "--registry", registry])).stdout.trim();
-        requireCondition(this.username, "Missing npm identity");
-      },
-    );
-    await this.check("npm publishing 2FA (auth-and-writes) must be enabled", async () => {
-      const profile = json(
-        (await this.run("npm", ["profile", "get", "--json", "--registry", registry])).stdout,
-      );
-      requireCondition(
-        profile.tfa?.mode === "auth-and-writes" && !profile.tfa.pending,
-        "Enable npm publishing 2FA manually",
-      );
-    });
     this.metadata = await this.check("npm package existence/versions", () => this.npmMetadata());
     const allTags = (await this.git(["tag", "--list", "--sort=-v:refname"]))
       .split("\n")
@@ -287,6 +259,15 @@ export class ReleaseSession {
     const tags = allTags.filter((t) => t.startsWith("v") && stableVersion.test(t.slice(1)));
     this.latestTag = this.state?.previousTag ?? tags[0];
     this.initial = this.metadata === null && allTags.length === 0 && !this.state;
+    if (
+      !this.state &&
+      this.latestTag &&
+      this.metadata &&
+      !this.metadata.versions?.[this.latestTag.slice(1)]
+    )
+      throw new Error(
+        "Incomplete release tag without local recovery state/archive; investigate before rebuilding or publishing.",
+      );
     if (!this.state)
       await this.check(
         "Release baseline must match npm/latest and its Git tag; a newer manifest must be unpublished",
@@ -308,6 +289,16 @@ export class ReleaseSession {
           );
           await this.git(["merge-base", "--is-ancestor", this.latestTag, "HEAD"]);
           const tagged = json(await this.git(["show", `${this.latestTag}:package.json`]));
+          const released = await this.github(`repos/${this.repo}/releases/tags/${this.latestTag}`, {
+            missing: true,
+          });
+          requireCondition(
+            released &&
+              !released.draft &&
+              !released.prerelease &&
+              released.tag_name === this.latestTag,
+            "Published baseline is missing its GitHub release; recover that release before creating a new version.",
+          );
           requireCondition(
             tagged.name === this.pkg.name && tagged.version === baseline,
             "Tagged manifest does not match the published baseline",
@@ -337,8 +328,15 @@ export class ReleaseSession {
           }
         },
       );
-    if (this.metadata && this.username)
-      await this.check("npm collaborator write permission", async () => {
+    await this.check("Local npm authentication required: run npm login", async () => {
+      requireCondition(
+        (await this.run("npm", ["config", "get", "registry"])).stdout.trim() === registry &&
+          (!this.pkg.publishConfig?.registry || this.pkg.publishConfig.registry === registry),
+        "Expected the public npm registry",
+      );
+      this.username = (await this.run("npm", ["whoami", "--registry", registry])).stdout.trim();
+      requireCondition(this.username, "No local npm identity");
+      if (this.metadata) {
         const permissions = json(
           (
             await this.run("npm", [
@@ -352,19 +350,83 @@ export class ReleaseSession {
             ])
           ).stdout,
         );
-        requireCondition(permissions[this.username]?.includes("write"), "No npm write permission");
+        requireCondition(
+          typeof permissions[this.username] === "string" &&
+            permissions[this.username].includes("write"),
+          "npm account lacks package write access",
+        );
+      }
+    });
+    if (!this.state) await this.analyzeChanges();
+  }
+
+  async analyzeChanges() {
+    const range = this.latestTag ? `${this.latestTag}..HEAD` : "HEAD";
+    const lines = (await this.git(["log", "--format=%H %s", range])).split("\n").filter(Boolean);
+    this.changes = [];
+    const relevant = (file) =>
+      /^(src\/|icons\/|scripts\/|example\/|\.github\/workflows\/|package(?:-lock)?\.json$|icons\.config\.json$|(?:tsconfig|biome)\.json$|\.npmrc$|LICENSE$)/.test(
+        file,
+      );
+    const net = this.latestTag
+      ? (await this.git(["diff", "--name-only", this.latestTag, "HEAD"]))
+          .split("\n")
+          .filter(relevant)
+      : ["initial"];
+    const stripVersion = (data) => {
+      const object = json(data);
+      delete object.version;
+      if (object.packages?.[""]) delete object.packages[""].version;
+      return object;
+    };
+    let meaningfulNet = net.some((file) => !manifests.includes(file));
+    for (const file of net.filter((file) => manifests.includes(file))) {
+      const before = await this.run("git", ["show", `${this.latestTag}:${file}`], {
+        allowFailure: true,
       });
+      const after = await this.run("git", ["show", `HEAD:${file}`], { allowFailure: true });
+      if (
+        before.code ||
+        after.code ||
+        !isDeepStrictEqual(stripVersion(before.stdout), stripVersion(after.stdout))
+      )
+        meaningfulNet = true;
+    }
+    for (const line of lines) {
+      const [hash, ...words] = line.split(" ");
+      const files = (
+        await this.git(["diff-tree", "--root", "--no-commit-id", "--name-only", "-r", hash])
+      )
+        .split("\n")
+        .filter(relevant);
+      let meaningful = files.some((file) => !manifests.includes(file));
+      for (const file of files.filter((file) => manifests.includes(file))) {
+        const before = await this.run("git", ["show", `${hash}^:${file}`], { allowFailure: true });
+        const after = await this.run("git", ["show", `${hash}:${file}`], { allowFailure: true });
+        if (before.code || after.code) {
+          meaningful = true;
+          continue;
+        }
+        if (!isDeepStrictEqual(stripVersion(before.stdout), stripVersion(after.stdout)))
+          meaningful = true;
+      }
+      if (meaningful && meaningfulNet) this.changes.push({ hash, subject: words.join(" ") });
+    }
+    this.relevant = new Set(this.changes.map(({ hash }) => hash));
   }
 
   validateState() {
     const s = this.state;
     requireCondition(
-      s.schema === 1 &&
+      [1, 2, 3].includes(s.schema) &&
         s.repo === this.repo &&
         s.name === this.pkg.name &&
         stableVersion.test(s.version) &&
         /^[a-f0-9]{40,64}$/.test(s.base) &&
         typeof s.notes === "string" &&
+        (s.npmPublishAccepted === undefined ||
+          s.npmPublishAccepted === null ||
+          typeof s.npmPublishAccepted === "boolean") &&
         /^sha512-[A-Za-z0-9+/]+=*$/.test(s.integrity),
       "Invalid recovery state; investigate without deleting published refs.",
     );
@@ -515,7 +577,7 @@ export class ReleaseSession {
         proposed[file] = { before: sha(originals[file]), content };
       }
       await this.run("npm", ["run", "build"], { cwd: stage, interactive: true });
-      const [packed] = json(
+      const packed = packResult(
         (await this.run("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], { cwd: stage }))
           .stdout,
       );
@@ -606,22 +668,105 @@ export class ReleaseSession {
     );
   }
 
-  async finish() {
-    await this.checkTree();
+  verifyPublication(published) {
+    const s = this.state;
+    requireCondition(
+      published?.name === s.name &&
+        published?.version === s.version &&
+        published?.dist?.integrity === s.integrity,
+      "npm publication identity/integrity conflict; do not republish or change release refs",
+    );
+  }
+
+  async publishLocal() {
     const s = this.state;
     const tarball = join(this.stateDir, "package.tgz");
     requireCondition(
       integrity(await readFile(tarball)) === s.integrity,
-      "Recovery tarball changed",
+      "Local recovery tarball changed; do not publish",
     );
-    const existing = await this.npmMetadata(s.version);
+    let published = await this.npmMetadata(s.version);
+    if (published) this.verifyPublication(published);
+    if (!published && s.npmPublishAccepted === false) {
+      requireCondition(
+        this.tty && !this.ci,
+        "Local npm publishing requires a terminal for npm 2FA/passkey approval",
+      );
+      // Unknown is saved before upload, so a killed process never blindly retries it.
+      s.npmPublishAccepted = null;
+      await this.save();
+      this.log("Publishing the checked local tarball. npm may request 2FA/passkey approval.");
+      try {
+        await this.run(
+          "npm",
+          [
+            "publish",
+            tarball,
+            "--access",
+            "public",
+            "--tag",
+            "latest",
+            "--registry",
+            registry,
+            "--ignore-scripts",
+            "--provenance=false",
+          ],
+          { interactive: true },
+        );
+      } catch {
+        throw new Error(
+          "Local npm publish failed or was interrupted; upload outcome is uncertain. Check npm and rerun release to verify availability, never republish blindly.",
+        );
+      }
+      s.npmPublishAccepted = true;
+      await this.save();
+    }
+    for (let attempt = 0; !published; attempt++) {
+      published = await this.npmMetadata(s.version);
+      if (published) break;
+      requireCondition(
+        attempt < 30,
+        "npm publication remains unavailable after 15 minutes; it may still be processing. Keep local recovery files and rerun release to verify, not resubmit.",
+      );
+      await this.pause(30_000);
+    }
+    this.verifyPublication(published);
+    const path = `repos/${this.repo}/releases`;
+    let released = await this.github(`${path}/tags/v${s.version}`, { missing: true });
+    if (!released) {
+      await this.github(path, {
+        body: {
+          tag_name: `v${s.version}`,
+          name: `v${s.version}`,
+          target_commitish: s.commit,
+          body: s.notes,
+          draft: false,
+          prerelease: false,
+        },
+      });
+      released = await this.github(`${path}/tags/v${s.version}`);
+    }
     requireCondition(
-      !existing || existing.dist?.integrity === s.integrity,
-      "npm version/integrity conflict; do not change release refs",
+      released.tag_name === `v${s.version}` && !released.draft && !released.prerelease,
+      "GitHub release conflicts with local release state",
+    );
+    this.verifyPublication(await this.npmMetadata(s.version));
+  }
+
+  async finish() {
+    await this.checkTree();
+    const s = this.state;
+    requireCondition(s.schema === 3, "Only checked local release recovery can be resumed");
+    requireCondition(
+      integrity(await readFile(join(this.stateDir, "package.tgz"))) === s.integrity,
+      "Local recovery tarball changed; do not publish",
     );
     let head = await this.git(["rev-parse", "HEAD"]);
     if (head === s.base) {
-      this.log("Creating the checked version commit (no automatic rollback).");
+      requireCondition(
+        !(await this.npmMetadata(s.version)),
+        "Target version already exists; investigate before creating release refs",
+      );
       for (const file of manifests)
         await atomicWrite(join(this.root, file), s.manifests[file].content);
       await this.git(["add", "--", ...manifests]);
@@ -640,7 +785,6 @@ export class ReleaseSession {
         `Release v${s.version}`,
         s.commit,
       ]);
-    this.log("Synchronizing only main and the annotated release tag.");
     await this.refresh();
     await this.git([
       "push",
@@ -650,62 +794,10 @@ export class ReleaseSession {
       `refs/tags/v${s.version}:refs/tags/v${s.version}`,
     ]);
     await this.verifyRemoteTag();
-    let published = await this.npmMetadata(s.version);
-    if (!published) {
-      this.log(
-        "npm will request interactive 2FA/passkey approval. No OTP is stored or supplied by this script.",
-      );
-      await this.run(
-        "npm",
-        [
-          "publish",
-          tarball,
-          "--access",
-          "public",
-          "--tag",
-          "latest",
-          "--registry",
-          registry,
-          "--ignore-scripts",
-        ],
-        { interactive: true },
-      );
-      published = await this.npmMetadata(s.version);
-    }
-    requireCondition(
-      published?.name === s.name &&
-        published.version === s.version &&
-        published.dist?.integrity === s.integrity,
-      "npm publication missing or integrity conflict; do not republish blindly",
-    );
-    const path = `repos/${this.repo}/releases`;
-    let githubRelease = await this.github(`${path}/tags/v${s.version}`, { missing: true });
-    if (!githubRelease)
-      githubRelease = await this.github(path, {
-        body: {
-          tag_name: `v${s.version}`,
-          name: `v${s.version}`,
-          body: s.notes,
-          target_commitish: s.commit,
-          draft: false,
-          prerelease: false,
-        },
-      });
-    requireCondition(
-      githubRelease.tag_name === `v${s.version}` &&
-        githubRelease.body === s.notes &&
-        !githubRelease.draft &&
-        !githubRelease.prerelease,
-      "GitHub release conflicts with recovery state",
-    );
+    await this.publishLocal();
     await this.verifyRemoteTag();
-    const verified = await this.github(`${path}/tags/v${s.version}`);
-    requireCondition(
-      verified.id === githubRelease.id && verified.body === s.notes && !verified.draft,
-      "GitHub release verification failed",
-    );
     await rm(this.statePath);
-    await rm(tarball);
+    await rm(join(this.stateDir, "package.tgz"), { force: true });
     this.log(`Verified npm and GitHub release v${s.version}.`);
   }
 
@@ -729,7 +821,6 @@ export class ReleaseSession {
         { allowFailure: true },
       );
       requireCondition(tag.code === 1, "Release tag already exists or cannot be checked");
-      if (!(await this.ask(`Prepare local release ${version}?`))) return;
       const base = await this.git(["rev-parse", "HEAD"]);
       const candidate = await this.prepare(version);
       await this.checkTree();
@@ -738,7 +829,8 @@ export class ReleaseSession {
         "HEAD changed while validating",
       );
       this.state = {
-        schema: 1,
+        schema: 3,
+        npmPublishAccepted: false,
         repo: this.repo,
         name: this.pkg.name,
         version,
@@ -752,12 +844,8 @@ export class ReleaseSession {
       await this.save();
     }
     this.log(
-      `Repository: ${this.repo}\nVersion: ${this.state.version}\nTarball: ${this.state.integrity}\n${this.state.notes}`,
+      `Repository: ${this.repo}\nVersion: ${this.state.version}\nLocal candidate: ${this.state.integrity}\n${this.state.notes}`,
     );
-    if (!(await this.ask("COMMIT, TAG, PUSH AND PUBLISH this checked release?"))) {
-      this.log("Stopped without publication. Rerun npm run release to resume this version.");
-      return;
-    }
     await this.finish();
   }
 }
@@ -767,6 +855,17 @@ export async function runRelease(options = {}) {
   try {
     await session.initialize();
     if (!session.dryRun) await session.acquire();
+    if (!session.dryRun && session.completedLegacy) {
+      await rm(session.statePath);
+      await rm(join(session.stateDir, "package.tgz"), { force: true });
+    }
+    if (!session.state && !session.initial && !session.changes.length) {
+      session.log("No release-relevant changes; nothing to publish.");
+      if (session.dryRun) await session.prepare(session.pkg.version);
+      if (session.issues.length)
+        throw new Error("Local checks passed; real-release prerequisites remain unverified.");
+      return session;
+    }
     configureSession(session);
     await release(
       releaseOptions({

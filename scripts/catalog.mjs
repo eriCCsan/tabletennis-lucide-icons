@@ -89,11 +89,20 @@ export function parseSvg(source) {
 }
 
 export async function catalog(directory = new URL("../icons/", import.meta.url)) {
-  const files = (await readdir(directory)).filter((file) => file.endsWith(".svg")).sort();
+  const files = (await readdir(directory))
+    .filter((file) => /\.svg$/i.test(file))
+    .sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10));
   assert(files.length > 0, "At least one icon SVG is required");
   return Promise.all(
     files.map(async (file, index) => {
-      assert(file.startsWith(`${String(index + 1).padStart(2, "0")}-`), "Invalid icon numbering");
+      assert(
+        /^\d{2,}-[a-z][a-z0-9]*(?:-[a-z0-9]+)*\.svg$/.test(file),
+        `${file}: expected NN-lowercase-name.svg`,
+      );
+      assert(
+        file.startsWith(`${String(index + 1).padStart(2, "0")}-`),
+        `${file}: expected consecutive icon number ${index + 1}`,
+      );
       const source = await readFile(new URL(file, directory), "utf8");
       const slug = file.replace(/^\d+-|\.svg$/g, "");
       return {
@@ -104,7 +113,13 @@ export async function catalog(directory = new URL("../icons/", import.meta.url))
           .map((word) => word[0].toUpperCase() + word.slice(1))
           .join(""),
         source,
-        nodes: parseSvg(source),
+        nodes: (() => {
+          try {
+            return parseSvg(source);
+          } catch (error) {
+            throw new Error(`${file}: ${error.message}`);
+          }
+        })(),
         hash: createHash("sha256").update(source).digest("hex"),
       };
     }),

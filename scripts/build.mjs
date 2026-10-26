@@ -7,7 +7,7 @@ import { optimize } from "svgo";
 import { sheetSvg, spriteSvg } from "./assets.mjs";
 import { assetSvg, catalog, root } from "./catalog.mjs";
 import { loadConfig } from "./config.ts";
-import { bin, run } from "./run.mjs";
+import { bin, packResult, run } from "./run.mjs";
 
 const config = await loadConfig();
 await run("npm", ["run", "check"]);
@@ -103,16 +103,16 @@ await writeFile(join(dist, "sheet.png"), new Resvg(sheet).render().asPng());
 await run(bin("tsc"), ["--project", "example/react/tsconfig.json"]);
 await run(bin("vite"), ["build", "example/react"]);
 await run(process.execPath, ["--test", "tests/built.test.mjs", "tests/examples.test.mjs"]);
-const dryRun = JSON.parse(await run("npm", ["pack", "--dry-run", "--json"], { capture: true }));
+const dryRun = packResult(await run("npm", ["pack", "--dry-run", "--json"], { capture: true }));
 assert(
-  dryRun[0].files.every(({ path }) => /^(dist\/|README\.md$|LICENSE$|package\.json$)/.test(path)),
+  dryRun.files.every(({ path }) => /^(dist\/|README\.md$|LICENSE$|package\.json$)/.test(path)),
   "Unexpected package files",
 );
 await mkdir(join(root, "artifacts"), { recursive: true });
-const packed = JSON.parse(
+const packed = packResult(
   await run("npm", ["pack", "--json", "--pack-destination", "artifacts"], { capture: true }),
 );
-const tarball = join(root, "artifacts", packed[0].filename);
+const tarball = join(root, "artifacts", packed.filename);
 await run(bin("publint"), ["--strict", tarball]);
 // ATTW analyzes JS/types; raw SVG/PNG exports are validated by the artifact tests.
 await run(bin("attw"), [

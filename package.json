@@ -49,6 +49,7 @@
     "example:react": "node scripts/example.mjs react",
     "release": "node scripts/release.mjs",
     "release:dry-run": "node scripts/release.mjs --dry-run",
+    "icons:add": "node scripts/icons-add.mjs",
     "lint": "biome ci --error-on-warnings ."
   },
   "engines": {
@@ -68,6 +69,14 @@
     },
     "react-native-svg": {
       "optional": true
+    }
+  },
+  "overrides": {
+    "release-it": {
+      "undici": "7.30.1"
+    },
+    "get-uri": {
+      "basic-ftp": "6.2.3"
     }
   },
   "devDependencies": {

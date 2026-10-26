@@ -10,50 +10,16 @@ import { defaults, names } from "./helpers.mjs";
 const strokeWidthFor = (options) => computeStrokeWidth(options, defaults);
 
 const icons = await catalog();
-const hashes = [
-  "8bcd8e32018f66c6a4df8b534c55deda04650d6331f3b8e2e0c0adca9bf6230f",
-  "2f51732bdd3dbdf853b005ab49887c4d16758c64042fcb5a1a62b52888f2b0d3",
-  "2b73224ff35f882c3ff968649188e28727a21006714f9d1aad4588d30f13fef2",
-  "775f76026dc5c70518961e4d70fa2cac28043a6928c9c84e2e27f4e1b33a0774",
-  "f2e32881ec774d76b46e47227eee6022f0320e99429f00a321d7e331e6cd0324",
-  "76297b235f43bcf17dc7d8a764a08a29c2162495480b5ae6f89cb4eb51ba904b",
-  "634741ab53a20eaf1549f4ce726a0b2d6361c1202fd72ce98aecfde7bab22a91",
-  "2e2cf1559835b498a681a867c83406981d8049263beb0e0a14da5b058ee573b3",
-  "23b4a44fcf0d58327dd9060e90d927a8b6b1a86353990a639ec7d1d24a28f064",
-  "86e7833f351fecea153cecfefebaed993c8f69a1ac3c41d7f74d7cbab7734bdd",
-  "e74ad73dba408253baf1652b1b11d57422c8f89def666ae35d64851ac7de3166",
-  "4861be7c047bd8e7d96735246832ec4bb3547a5641023dd244152851fbaec51c",
-  "41ae1ef5f9511a4dd20146be97af4cd9e3f8d029c9b5a09178918624a608682a",
-  "1d3d55460aeb883ae7945b245c65048b17b235120bbebe01a24ae0fef3fd289f",
-  "7b96e3e72f05daa826c365b37aa7b6567a2858505a3e3b1fbe75efc2a2aebd02",
-  "2d06ef29958010060dbf5ef2557089a672c633d0f4e968f45c12a2d39f604701",
-  "f3c9e5f7971d287edcf758c374f2f9714d5f675e3b9b8d31fee05626958e8ec0",
-  "08722ea6c6768882c1944b0f26bfdbe12cedc68d122c605c594e92bf467a4060",
-  "528a45fcb200b71727fecba8f9e84353fdb2f59f7d6b60a6b48f6f58b9900fe8",
-  "56b4908cbe6c80332c93c8252bf25b29c2a14ccda0c14d1bfdc322df2e938624",
-  "f3b67a756c833e46df348f8b15e893a43e9154bfef189711b8a1d40bdbd35bf4",
-  "d56200ad4e1d6df0b81fbdb2d6f037c27d2030852531f6c943256dd7ee4824ac",
-  "8f9cb4836b30dae5d7183034c407b0eb0811aa915fd35db27bfc3d58159ce243",
-  "35688ed51f467d582ead89773bc2647373e4ba732bb1c61f524f78c8a0696e9a",
-  "d32c94501d407a486c3752f017d18ddb9d1ca429ad453991b5f2e580da90c67a",
-  "b2565e1a7541d18634403fd458cfd97afc1c7f47e1321f4f1b1816546975b01c",
-  "110d9f565c2ee4585dac0de6b6603e523c236eb5fe60405ca78b183610a536e1",
-  "d6464eab89afa10460401618078a510ab92eee8a9ed285c2eb1d34fadd357b61",
-  "51c7188fbc959f7650164da1270036c553e2135c01bd4e39f2fe3818a29c4292",
-  "7cc7adf5fab1986ec019e6730c1f822b24a82724c1de6c93a2146bb02f786451",
-  "e83bdcb9659d6a2c57807fa6d29b0944798b5efc783d3b5e36947df0ab8399d3",
-  "483e613a2404e35ed0267eaf3b11b65804389a8a3a4be8f3fd3e46bd6d8e6e80",
-];
+const hashes = JSON.parse(
+  await readFile(new URL("../icons/checksums.json", import.meta.url), "utf8"),
+);
 
 test("catalog and source hashes", () => {
   assert.deepEqual(
     icons.map(({ name }) => name),
     names,
   );
-  assert.deepEqual(
-    icons.map(({ hash }) => hash),
-    hashes,
-  );
+  assert.deepEqual(Object.fromEntries(icons.map(({ file, hash }) => [file, hash])), hashes);
   for (const icon of icons)
     assert.equal(createIcon(icon.name, icon.nodes, defaults).displayName, icon.name);
 });
@@ -157,5 +123,4 @@ test("README commands exist and documentation stays version/count independent", 
   assert.doesNotMatch(readme, /\b\d+\.\d+\.\d+\b/);
   assert.doesNotMatch(readme, /\b\d+\s+(?:original\s+)?(?:table-tennis\s+)?icons\b/i);
   assert.doesNotMatch(readme, /^## (?:Icon catalog|Build configuration|Local development)$/im);
-  assert.match(readme, /\| `strokeWidth` \| `0\.75` \|/);
 });

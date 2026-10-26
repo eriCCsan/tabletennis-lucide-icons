@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -13,10 +13,15 @@ import {
   repositoryName,
   runRelease,
 } from "../scripts/release.mjs";
-import { configureSession, releaseOptions } from "../scripts/release-plugin.mjs";
+import {
+  compareVersions,
+  configureSession,
+  nextVersion,
+  recommend,
+  releaseOptions,
+} from "../scripts/release-plugin.mjs";
 
 const root = new URL("../", import.meta.url).pathname;
-const digest = (data) => createHash("sha256").update(data).digest("hex");
 const sri = (data) => `sha512-${createHash("sha512").update(data).digest("base64")}`;
 
 async function fixture(t) {
@@ -83,238 +88,219 @@ async function fixture(t) {
 async function harness(t, { dryRun = false } = {}) {
   const f = await fixture(t);
   const network = {
-    remoteHead: f.base,
-    remoteTag: null,
     published: null,
-    githubRelease: null,
-    publishes: 0,
+    remoteHead: f.base,
+    tags: new Map(),
+    releases: new Map(),
     pushes: 0,
-    posts: 0,
+    publications: 0,
+    waits: 0,
+    reads: 0,
     fail: null,
-    prompts: [],
     logs: [],
   };
-  const response = (body, status = 200) => ({
-    code: status >= 400 ? 1 : 0,
-    stdout: `HTTP/2 ${status} Test\r\ncontent-type: application/json\r\n\r\n${JSON.stringify(body)}`,
+  const response = (data, code = 200) => ({
+    code: code >= 400 ? 1 : 0,
+    stdout: `HTTP/2 ${code} Test\r\ncontent-type: application/json\r\n\r\n${JSON.stringify(data)}`,
   });
-  const exec = async (name, inputArgs, options) => {
-    let args = [...inputArgs];
+  const exec = async (name, input, options) => {
+    let args = [...input];
     if (name === "git") {
       while (args[0] === "-c") args = args.slice(2);
-      if (["fetch", "push", "ls-remote"].includes(args[0])) {
-        if (network.fail === args[0]) throw new Error("Simulated network failure");
-        if (args[0] === "fetch") {
-          await f.git(["update-ref", "refs/remotes/origin/main", network.remoteHead]);
-        } else if (args[0] === "push") {
-          assert(args.includes("--atomic"));
-          assert(!args.some((a) => a.includes("force")));
-          network.pushes++;
-          network.remoteHead = await f.git(["rev-parse", "HEAD"]);
-          network.tagName = args.find((a) => a.startsWith("refs/tags/")).split(":")[0];
-          network.remoteTag = await f.git(["rev-parse", network.tagName]);
-        } else {
-          return {
-            code: 0,
-            stdout:
-              `${network.remoteHead}\trefs/heads/main\n` +
-              (network.remoteTag
-                ? `${network.remoteTag}\t${network.tagName}\n${network.remoteHead}\t${network.tagName}^{}\n`
-                : ""),
-          };
-        }
+      assert(!args.includes("--force") && !args.includes("reset") && !args.includes("--delete"));
+      if (args[0] === "fetch") {
+        await f.git(["update-ref", "refs/remotes/origin/main", network.remoteHead]);
         return { code: 0, stdout: "" };
       }
-      assert(!args.includes("reset") && !args.includes("--delete"), "No rollback commands");
+      if (args[0] === "push") {
+        assert(args.includes("--atomic"));
+        if (network.fail === "push") throw new Error("push failed");
+        network.pushes++;
+        network.remoteHead = await f.git(["rev-parse", "HEAD"]);
+        const tag = args.find((arg) => arg.startsWith("refs/tags/")).split(":")[0];
+        network.tags.set(tag, {
+          object: await f.git(["rev-parse", tag]),
+          commit: network.remoteHead,
+        });
+        return { code: 0, stdout: "" };
+      }
+      if (args[0] === "ls-remote")
+        return {
+          code: 0,
+          stdout:
+            `${network.remoteHead}\trefs/heads/main\n` +
+            [...network.tags]
+              .map(([ref, value]) => `${value.object}\t${ref}\n${value.commit}\t${ref}^{}\n`)
+              .join(""),
+        };
       return command(name, args, options);
     }
     if (name === "gh") {
-      if (network.fail === "gh") throw new Error("Simulated unavailable gh");
+      if (network.fail === "auth") throw new Error("auth failed");
       if (args[0] === "auth") return { code: 0, stdout: "" };
       const path = args[4];
       if (path === "repos/eriCCsan/tabletennis-lucide-icons")
         return response({ permissions: { push: true } });
-      if (path.endsWith("rules/branches/main")) return response(network.rules ?? []);
+      if (path.endsWith("/rules/branches/main")) return response(network.rules ?? []);
       if (path.endsWith("/protection")) return response({}, 404);
-      if (args.includes("POST")) {
-        if (network.fail === "github-create") throw new Error("Simulated GitHub failure");
-        network.posts++;
-        network.githubRelease = { ...JSON.parse(options.input), id: 42 };
-        return response(network.githubRelease);
+      if (path.includes("/releases/tags/")) {
+        const found = network.releases.get(path.split("/").at(-1));
+        return response(found ?? {}, found ? 200 : 404);
       }
-      return network.githubRelease && path.endsWith(`/tags/${network.githubRelease.tag_name}`)
-        ? response(network.githubRelease)
-        : response({}, 404);
+      if (path === "repos/eriCCsan/tabletennis-lucide-icons/releases" && args.includes("POST")) {
+        if (network.fail === "github") throw new Error("github release failed");
+        const data = JSON.parse(options.input);
+        assert.equal(network.published?.version, data.tag_name.slice(1));
+        network.releases.set(data.tag_name, { ...data, id: 42 });
+        return response({ ...data, id: 42 }, 201);
+      }
+      assert.fail(`Unexpected gh command: ${args.slice(0, 5).join(" ")}`);
     }
     if (name === "npm") {
-      if (args[0] === "publish") {
-        assert.equal(options.interactive, true);
-        assert(!args.some((a) => a.startsWith("--otp")));
-        network.publishes++;
-        const s = JSON.parse(
-          await readFile(join(f.dir, ".git/tabletennis-release/state.json"), "utf8"),
-        );
-        if (network.fail === "publish-before") throw new Error("Simulated rejected publish");
-        network.published = { name: s.name, version: s.version, dist: { integrity: s.integrity } };
-        if (network.fail === "publish-after")
-          throw new Error("Simulated response loss after publish");
-        return { code: 0, stdout: "" };
-      }
-      if (args[0] === "whoami") return { code: 0, stdout: "fixture-user\n" };
       if (args[0] === "config") return { code: 0, stdout: registry };
-      if (args[0] === "profile")
+      if (args[0] === "whoami") {
+        if (network.fail === "npm auth") throw new Error("npm login required");
+        return { code: 0, stdout: "fixture-user" };
+      }
+      if (args[0] === "access")
         return {
           code: 0,
-          stdout: JSON.stringify({ tfa: { mode: network.tfa ?? "auth-and-writes" } }),
+          stdout: JSON.stringify({ "fixture-user": network.permission ?? "read-write" }),
         };
-      if (args[0] === "access") return { code: 0, stdout: '{"fixture-user":"read-write"}' };
+      if (args[0] === "publish") {
+        if (network.fail === "npm before") throw new Error("npm rejected before upload");
+        assert.equal(options.interactive, true);
+        assert(args.includes("--ignore-scripts") && args.includes("--provenance=false"));
+        const state = JSON.parse(
+          await readFile(join(f.dir, ".git/tabletennis-release/state.json")),
+        );
+        assert.equal(
+          state.npmPublishAccepted,
+          null,
+          "Persist uncertainty before the network write",
+        );
+        network.publications++;
+        network.published = {
+          name: f.pkg.name,
+          version: state.version,
+          dist: { integrity: state.integrity },
+        };
+        if (network.fail === "npm after") throw new Error("Connection lost after upload");
+        return { code: 0, stdout: "" };
+      }
+      assert(!["login", "profile"].includes(args[0]), "No account changes");
     }
     return command(name, args, options);
   };
   const request = async (url) => {
-    if (network.fail === "registry") throw new Error("Simulated registry outage");
-    const singleVersion = new URL(url).pathname.split("/").length > 2;
-    const requestedVersion = new URL(url).pathname.split("/")[2];
-    if (!singleVersion && network.metadata)
-      return { status: 200, ok: true, json: async () => network.metadata };
-    const body =
-      network.published && (!singleVersion || requestedVersion === network.published.version)
-        ? singleVersion
-          ? network.published
-          : {
-              versions: { [network.published.version]: network.published },
-              "dist-tags": { latest: network.published.version },
-            }
+    const version = decodeURIComponent(new URL(url).pathname).split("/")[2];
+    let value = network.published;
+    if (version && value?.version === version) {
+      network.reads++;
+      if (network.delay && network.reads <= network.delay) value = null;
+      if (value && network.conflict) value = { ...value, dist: { integrity: "conflict" } };
+    }
+    const data = version
+      ? value?.version === version
+        ? value
+        : null
+      : value
+        ? { "dist-tags": { latest: value.version }, versions: { [value.version]: value } }
         : null;
-    return { status: body ? 200 : 404, ok: Boolean(body), json: async () => body };
+    return { ok: Boolean(data), status: data ? 200 : 404, json: async () => data };
   };
-  const session = () =>
-    new ReleaseSession({
-      root: f.dir,
-      dryRun,
-      exec,
-      request,
-      tty: true,
-      ci: false,
-      ask: async (message) => {
-        network.prompts.push(message);
-        return network.answer !== false;
-      },
-      log: (message) => network.logs.push(message),
+  const options = () => ({
+    root: f.dir,
+    dryRun,
+    exec,
+    request,
+    pause: async () => {
+      network.waits++;
+    },
+    tty: true,
+    ci: false,
+    log: (message) => network.logs.push(message),
+  });
+  const baseline = async () => {
+    await f.git(["tag", "--annotate", "v0.1.0", "-m", "published"]);
+    network.tags.set("refs/tags/v0.1.0", {
+      object: await f.git(["rev-parse", "v0.1.0"]),
+      commit: f.base,
     });
-  const fastPrepare = async (s) => {
+    network.published = { name: f.pkg.name, version: "0.1.0" };
+    network.releases.set("v0.1.0", { tag_name: "v0.1.0", draft: false, prerelease: false });
+  };
+  const change = async (message, { file = "scripts-tool.mjs", version } = {}) => {
+    if (file === "scripts-tool.mjs") file = "package.json";
+    if (file === "package.json") {
+      const pkg = JSON.parse(await readFile(join(f.dir, file), "utf8"));
+      if (version) {
+        pkg.version = version;
+        const path = join(f.dir, "package-lock.json");
+        const lock = JSON.parse(await readFile(path, "utf8"));
+        lock.version = version;
+        lock.packages[""].version = version;
+        await writeFile(path, `${JSON.stringify(lock, null, 2)}\n`);
+      } else pkg.description = message;
+      await writeFile(join(f.dir, file), `${JSON.stringify(pkg, null, 2)}\n`);
+    } else await writeFile(join(f.dir, file), message);
+    await f.git(["add", "."]);
+    await f.git(["commit", "-m", message]);
+    network.remoteHead = await f.git(["rev-parse", "HEAD"]);
+  };
+  const session = () => {
+    const s = new ReleaseSession(options());
     s.prepare = async (version) => {
-      const proposed = {};
+      const manifests = {};
       for (const file of ["package.json", "package-lock.json"]) {
-        const text = await readFile(join(f.dir, file), "utf8");
-        const data = JSON.parse(text);
+        const source = await readFile(join(f.dir, file), "utf8");
+        const data = JSON.parse(source);
         data.version = version;
-        if (file === "package-lock.json") data.packages[""].version = version;
-        proposed[file] = { before: digest(text), content: `${JSON.stringify(data, null, 2)}\n` };
+        if (data.packages) data.packages[""].version = version;
+        manifests[file] = {
+          before: createHash("sha256").update(source).digest("hex"),
+          content: `${JSON.stringify(data, null, 2)}\n`,
+        };
       }
+      const tarball = Buffer.from("simulated checked archive");
       s.prepared = true;
-      const tarball = Buffer.from("isolated simulated archive");
-      return { tarball, integrity: sri(tarball), manifests: proposed };
+      return { manifests, tarball, integrity: sri(tarball) };
     };
+    return s;
   };
-  return { ...f, network, session, fastPrepare };
+  return { ...f, network, options, baseline, change, session };
 }
 
-async function pendingManifestHarness(t, { dryRun = false, version = "0.1.1" } = {}) {
-  const h = await harness(t, { dryRun });
-  await h.git(["tag", "--annotate", "v0.1.0", "-m", "published baseline"]);
-  h.network.remoteTag = await h.git(["rev-parse", "v0.1.0"]);
-  h.network.tagName = "refs/tags/v0.1.0";
-  h.network.published = { name: h.pkg.name, version: "0.1.0" };
-  for (const file of ["package.json", "package-lock.json"]) {
-    const path = join(h.dir, file);
-    const data = JSON.parse(await readFile(path, "utf8"));
-    data.version = version;
-    if (file === "package-lock.json") data.packages[""].version = version;
-    await writeFile(path, `${JSON.stringify(data, null, 2)}\n`);
+async function executeRelease(session) {
+  const previous = process.cwd();
+  try {
+    process.chdir(session.root);
+    await session.initialize();
+    if (!session.dryRun) await session.acquire();
+    if (!session.state && !session.initial && !session.changes.length) return session;
+    configureSession(session);
+    await release(
+      releaseOptions({
+        initial: session.initial,
+        resume: Boolean(session.state),
+        pendingVersion: session.pendingVersion,
+        dryRun: session.dryRun,
+      }),
+    );
+    return session;
+  } finally {
+    process.chdir(previous);
+    configureSession(null);
+    await session.unlock();
   }
-  await h.git(["add", "package.json", "package-lock.json"]);
-  await h.git(["commit", "-m", "chore: prepare manifest version"]);
-  h.network.remoteHead = await h.git(["rev-parse", "HEAD"]);
-  return h;
 }
 
-for (const dryRun of [true, false]) {
-  test(`pending manifest uses the exact target without double increment (${dryRun ? "dry-run" : "simulated release"})`, async (t) => {
-    const h = await pendingManifestHarness(t, { dryRun });
-    const head = await h.git(["rev-parse", "HEAD"]);
-    const before = await readFile(join(h.dir, "package-lock.json"), "utf8");
-    const cwd = process.cwd();
-    try {
-      process.chdir(h.dir);
-      const session = await runRelease(h.session());
-      assert.equal(session.baselineVersion, "0.1.0");
-      assert.equal(session.pendingVersion, "0.1.1");
-      assert(h.network.logs.some((message) => message.includes("→ 0.1.1")));
-      if (dryRun) {
-        assert.equal(await h.git(["rev-parse", "HEAD"]), head);
-        assert.equal(await h.git(["tag", "--list"]), "v0.1.0");
-        assert.equal(h.network.publishes + h.network.pushes + h.network.posts, 0);
-        await assert.rejects(readFile(session.statePath), { code: "ENOENT" });
-      } else {
-        assert.equal(h.network.published.version, "0.1.1");
-        assert.equal(h.network.publishes, 1);
-        assert.equal(h.network.posts, 1);
-        const releasedHead = await h.git(["rev-parse", "HEAD"]);
-        assert.equal(await h.git(["rev-parse", "v0.1.1^{}"]), releasedHead);
-        await runRelease(h.session());
-        assert.equal(await h.git(["rev-parse", "HEAD"]), releasedHead);
-        assert.equal(h.network.publishes, 1);
-        assert.equal(h.network.posts, 1);
-      }
-      assert.equal(await readFile(join(h.dir, "package-lock.json"), "utf8"), before);
-    } finally {
-      process.chdir(cwd);
-    }
-  });
-}
-
-for (const condition of [
-  "older manifest",
-  "published target",
-  "npm/tag mismatch",
-  "lock mismatch",
-]) {
-  test(`baseline rejects ${condition} before release preparation`, async (t) => {
-    const h = await pendingManifestHarness(t, {
-      version: condition === "older manifest" ? "0.0.9" : "0.1.1",
-    });
-    if (condition === "lock mismatch") {
-      const path = join(h.dir, "package-lock.json");
-      const lock = JSON.parse(await readFile(path, "utf8"));
-      lock.packages[""].version = "0.1.0";
-      await writeFile(path, `${JSON.stringify(lock, null, 2)}\n`);
-      await h.git(["add", "package-lock.json"]);
-      await h.git(["commit", "-m", "chore: fixture lock mismatch"]);
-      h.network.remoteHead = await h.git(["rev-parse", "HEAD"]);
-    }
-    const session = h.session();
-    if (["published target", "npm/tag mismatch"].includes(condition)) {
-      h.network.metadata = {
-        versions: { "0.1.0": {}, "0.1.1": {} },
-        "dist-tags": { latest: condition === "npm/tag mismatch" ? "0.1.1" : "0.1.0" },
-      };
-    }
-    const head = await h.git(["rev-parse", "HEAD"]);
-    await assert.rejects(session.initialize(), /Release baseline/);
-    assert.equal(await h.git(["rev-parse", "HEAD"]), head);
-    assert.equal(await h.git(["tag", "--list"]), "v0.1.0");
-    assert.equal(h.network.publishes + h.network.pushes + h.network.posts, 0);
-    assert.equal(session.prepared, false);
-  });
-}
-
-test("release configuration disables all built-in writers and CLI overrides", async () => {
+test("release options are noninteractive, disable all built-in writers and reject unsafe overrides", async () => {
   const config = new Config(releaseOptions({ dryRun: true }));
   await config.init();
   for (const name of ["git", "npm", "github", "gitlab"]) assert.equal(config.options[name], false);
   assert.equal(config.isDryRun, true);
-  assert.equal(config.isCI, false);
+  assert.equal(config.isCI, true);
   assert.equal(config.options.plugins["@release-it/conventional-changelog"].infile, false);
   assert.deepEqual(parseArguments([]), { dryRun: false });
   assert.deepEqual(parseArguments(["--dry-run"]), { dryRun: true });
@@ -327,321 +313,359 @@ test("release configuration disables all built-in writers and CLI overrides", as
   assert.throws(() => repositoryName("https://user:credential@github.com/owner/repo.git"));
 });
 
-for (const [message, expected] of [
+for (const [message, expected, file] of [
   ["fix: correct icon", "0.1.1"],
   ["feat: add icon", "0.2.0"],
   ["feat!: change API", "1.0.0"],
   ["fix: update API\n\nBREAKING CHANGE: remove old prop", "1.0.0"],
   ["chore!: remove compatibility", "1.0.0"],
-  ["docs: clarify setup", null],
+  ["Improve release tooling", "0.1.1"],
+  ["docs: clarify setup", null, "README.md"],
+  ["test: improve assertions", null, "test.txt"],
 ]) {
-  test(`official plugin computes ${expected ?? "no release"} for ${message.split("\n")[0]}`, async (t) => {
-    const f = await fixture(t);
-    await f.git(["tag", "--annotate", "v0.1.0", "-m", "initial"]);
-    await f.git(["commit", "--allow-empty", "-m", message]);
-    const cwd = process.cwd();
+  test(`official plugin/relevance computes ${expected ?? "no release"} for ${message.split("\n")[0]}`, async (t) => {
+    const h = await harness(t, { dryRun: true });
+    await h.baseline();
+    await h.change(message, { file });
+    const before = await h.git(["rev-parse", "HEAD"]);
+    const s = h.session();
     let observed = null;
-    try {
-      process.chdir(f.dir);
-      configureSession({
-        pkg: f.pkg,
-        repo: "eriCCsan/tabletennis-lucide-icons",
-        latestTag: "v0.1.0",
-        perform: async (version, notes) => {
-          observed = version;
-          assert(notes);
-        },
-      });
-      await release({ ...releaseOptions({ dryRun: true }), quiet: true });
-    } finally {
-      configureSession(null);
-      process.chdir(cwd);
-    }
+    s.prepare = async (version) => {
+      observed = version;
+      s.prepared = true;
+    };
+    await executeRelease(s);
     assert.equal(observed, expected);
+    if (expected) assert(h.network.logs.some((line) => line.includes(message.split("\n")[0])));
+    assert.equal(await h.git(["rev-parse", "HEAD"]), before);
+    assert.equal(h.network.pushes + h.network.publications, 0);
+    await assert.rejects(readFile(s.statePath), { code: "ENOENT" });
   });
 }
 
-test("first release retains manifest version even with breaking commits", async (t) => {
-  const f = await fixture(t);
-  await f.git(["commit", "--allow-empty", "-m", "feat!: initial API"]);
-  const cwd = process.cwd();
-  let observed;
-  try {
-    process.chdir(f.dir);
-    configureSession({
-      pkg: f.pkg,
-      repo: "eriCCsan/tabletennis-lucide-icons",
-      perform: async (v) => {
-        observed = v;
-      },
-    });
-    await release({ ...releaseOptions({ initial: true, dryRun: true }), quiet: true });
-  } finally {
-    configureSession(null);
-    process.chdir(cwd);
-  }
-  assert.equal(observed, "0.1.0");
-  assert.equal((await readFile(join(f.dir, "package.json"), "utf8")).includes('"0.1.0"'), true);
+test("initial release retains the unpublished manifest version even with breaking commits", async (t) => {
+  const h = await harness(t, { dryRun: true });
+  await h.change("feat!: initial API");
+  const s = h.session();
+  let version;
+  s.prepare = async (value) => {
+    version = value;
+  };
+  await executeRelease(s);
+  assert.equal(version, "0.1.0");
 });
 
-test("real candidate preparation builds and packs an isolated copy without changing source", async (t) => {
+test("manual version must meet recommendation and is never bumped twice", async (t) => {
+  for (const [prepared, expected] of [
+    ["0.1.1", false],
+    ["0.2.0", true],
+    ["1.0.0", true],
+  ]) {
+    const h = await harness(t, { dryRun: true });
+    await h.baseline();
+    await h.change("feat: add icon");
+    await h.change("chore: prepare version", { version: prepared });
+    const s = h.session();
+    let version;
+    s.prepare = async (value) => {
+      version = value;
+    };
+    if (expected) {
+      await executeRelease(s);
+      assert.equal(version, prepared);
+    } else await assert.rejects(executeRelease(s), /lower than/);
+  }
+});
+
+test("version-only change produces no release", async (t) => {
+  const h = await harness(t);
+  await h.baseline();
+  await h.change("chore: prepare version", { version: "0.1.1" });
+  const s = h.session();
+  await executeRelease(s);
+  assert.equal(s.changes.length, 0);
+  assert.equal(h.network.pushes, 0);
+});
+
+test("real candidate build and pack use isolated synchronized manifests, preserving originals", async (t) => {
   const h = await harness(t, { dryRun: true });
+  const before = await readFile(join(h.dir, "package.json"), "utf8");
   const s = h.session();
   await s.initialize();
-  const before = await readFile(join(h.dir, "package.json"), "utf8");
-  const candidate = await s.prepare("0.2.0");
-  assert.equal(JSON.parse(candidate.manifests["package.json"].content).version, "0.2.0");
+  const candidate = await ReleaseSession.prototype.prepare.call(s, "0.1.1");
+  assert.equal(JSON.parse(candidate.manifests["package.json"].content).version, "0.1.1");
   assert.equal(
     JSON.parse(candidate.manifests["package-lock.json"].content).packages[""].version,
-    "0.2.0",
+    "0.1.1",
   );
+  assert.equal(candidate.integrity, sri(candidate.tarball));
   assert.equal(await readFile(join(h.dir, "package.json"), "utf8"), before);
-  assert.equal(await h.git(["status", "--porcelain"]), "");
-  assert.equal(await h.git(["tag", "--list"]), "");
-  assert.equal(h.network.publishes + h.network.pushes + h.network.posts, 0);
+  await assert.rejects(readFile(join(h.dir, "dist/index.js")), { code: "ENOENT" });
 });
 
-test("dry-run performs local preparation despite missing remote checks and never writes state", async (t) => {
-  const h = await harness(t, { dryRun: true });
-  h.network.fail = "ls-remote";
-  const s = h.session();
-  await s.initialize();
-  await h.fastPrepare(s);
-  await s.perform("0.1.0", "Initial release.");
-  assert(s.issues.some((i) => i.includes("origin")));
-  assert(s.prepared);
-  await assert.rejects(readFile(join(s.stateDir, "state.json")), { code: "ENOENT" });
-  assert.equal(h.network.prompts.length, 0);
-  assert.equal(h.network.publishes + h.network.pushes + h.network.posts, 0);
+for (const failure of ["push", "github"]) {
+  test(`interrupted ${failure} resumes same version/tag without duplicate publication`, async (t) => {
+    const h = await harness(t);
+    await h.baseline();
+    await h.change("fix: correct package");
+    h.network.fail = failure;
+    await assert.rejects(executeRelease(h.session()), new RegExp(failure));
+    const head = await h.git(["rev-parse", "HEAD"]);
+    assert.equal(await h.git(["cat-file", "-t", "v0.1.1"]), "tag");
+    h.network.fail = null;
+    await executeRelease(h.session());
+    assert.equal(await h.git(["rev-parse", "HEAD"]), head);
+    assert.equal(h.network.publications, 1);
+    await executeRelease(h.session());
+    assert.equal(h.network.publications, 1);
+  });
+}
+
+test("recovery rejects externally modified or unrelated staged files", async (t) => {
+  const h = await harness(t);
+  await h.baseline();
+  await h.change("fix: update");
+  h.network.fail = "github";
+  await assert.rejects(executeRelease(h.session()));
+  const path = join(h.dir, "package.json");
+  const pkg = JSON.parse(await readFile(path, "utf8"));
+  pkg.description = "unauthorized recovery edit";
+  await writeFile(path, JSON.stringify(pkg));
+  await assert.rejects(h.session().initialize(), /Working directory/);
 });
 
-test("dry-run remote inspection does not update cached refs or import remote tags", async (t) => {
+for (const condition of [
+  "branch",
+  "dirty",
+  "remote",
+  "auth",
+  "npm auth",
+  "npm permission",
+  "rules",
+  "lock version",
+  "old version",
+]) {
+  test(`preflight blocks ${condition} without publication`, async (t) => {
+    const h = await harness(t);
+    await h.baseline();
+    if (condition === "branch") await h.git(["switch", "-c", "feature"]);
+    if (condition === "dirty") await writeFile(join(h.dir, "dirty.txt"), "untracked");
+    if (condition === "remote") h.network.remoteHead = "a".repeat(40);
+    if (condition === "auth") h.network.fail = "auth";
+    if (condition === "npm auth") h.network.fail = "npm auth";
+    if (condition === "npm permission") h.network.permission = "read-only";
+    if (condition === "rules") h.network.rules = [{ type: "pull_request" }];
+    if (condition === "lock version") {
+      const path = join(h.dir, "package-lock.json");
+      const lock = JSON.parse(await readFile(path, "utf8"));
+      lock.version = "0.0.1";
+      await writeFile(path, JSON.stringify(lock));
+      await h.git(["add", "."]);
+      await h.git(["commit", "-m", "bad lock"]);
+      h.network.remoteHead = await h.git(["rev-parse", "HEAD"]);
+    }
+    if (condition === "old version") await h.change("chore: bad version", { version: "0.0.9" });
+    await assert.rejects(h.session().initialize());
+    assert.equal(h.network.pushes + h.network.publications, 0);
+  });
+}
+
+test("dry-run completes isolated build despite reported branch/dirty preconditions and changes no refs/state", async (t) => {
   const h = await harness(t, { dryRun: true });
+  await h.baseline();
+  await h.git(["switch", "-c", "feature"]);
+  await writeFile(join(h.dir, "notes.txt"), "local edit");
   const refs = await h.git(["show-ref"]);
-  h.network.remoteHead = "1".repeat(40);
-  h.network.remoteTag = "2".repeat(40);
-  h.network.tagName = "refs/tags/v9.0.0";
-  const s = h.session();
-  await s.initialize();
-  assert(s.issues.some((i) => i.includes("origin")));
-  assert.equal(await h.git(["show-ref"]), refs);
-  assert.equal(await h.git(["tag", "--list"]), "");
-});
-
-test("full dry-run reports remote gaps after actual isolated build", async (t) => {
-  const h = await harness(t, { dryRun: true });
-  h.network.fail = "ls-remote";
-  const options = h.session();
   const cwd = process.cwd();
-  const before = await h.git(["show-ref"]);
   try {
     process.chdir(h.dir);
-    await assert.rejects(runRelease(options), /local checks completed.*unverified/);
+    await assert.rejects(runRelease(h.options()), /prerequisites/);
   } finally {
     process.chdir(cwd);
   }
-  assert.equal(await h.git(["show-ref"]), before);
-  assert.equal(await h.git(["status", "--porcelain"]), "");
-  assert.equal(h.network.publishes + h.network.posts + h.network.pushes, 0);
+  assert.equal(await h.git(["show-ref"]), refs);
   await assert.rejects(readFile(join(h.dir, ".git/tabletennis-release/state.json")), {
     code: "ENOENT",
   });
 });
 
-for (const failure of ["publish-before", "publish-after", "github-create", "push"]) {
-  test(`resume after ${failure} preserves version/commit/tag and avoids duplicate publish`, async (t) => {
-    const h = await harness(t);
-    let s = h.session();
-    await s.initialize();
-    await s.acquire();
-    await h.fastPrepare(s);
-    h.network.fail = failure;
-    await assert.rejects(s.perform("0.1.0", "Initial release."));
-    await s.unlock();
-    const commit = await h.git(["rev-parse", "HEAD"]);
-    const tag = await h.git(["rev-parse", "refs/tags/v0.1.0"]);
-    assert.equal(await h.git(["cat-file", "-t", tag]), "tag");
-    assert.notEqual(commit, h.base);
-    h.network.fail = null;
-    s = h.session();
-    await s.initialize();
-    assert.equal(s.state.version, "0.1.0");
-    await s.acquire();
-    try {
-      await s.perform("0.1.0", "ignored on resume");
-    } finally {
-      await s.unlock();
-    }
-    assert.equal(await h.git(["rev-parse", "HEAD"]), commit);
-    assert.equal(await h.git(["rev-parse", "refs/tags/v0.1.0"]), tag);
-    assert.equal(h.network.publishes, failure === "publish-before" ? 2 : 1);
-    assert.equal(h.network.posts, 1);
-    await assert.rejects(readFile(join(s.stateDir, "state.json")), { code: "ENOENT" });
-  });
-}
-
-test("declining preparation or publication creates no commit/tag/push/publish", async (t) => {
+test("parallel local sessions cannot acquire or remove another session's lock", async (t) => {
   const h = await harness(t);
-  const s = h.session();
-  await s.initialize();
-  await s.acquire();
-  await h.fastPrepare(s);
-  h.network.answer = false;
-  try {
-    await s.perform("0.1.0", "Initial release.");
-  } finally {
-    await s.unlock();
-  }
-  assert.equal(await h.git(["rev-parse", "HEAD"]), h.base);
-  assert.equal(await h.git(["tag", "--list"]), "");
-  assert.equal(h.network.publishes + h.network.pushes + h.network.posts, 0);
+  const a = h.session();
+  const b = h.session();
+  await a.initialize();
+  await b.initialize();
+  await a.acquire();
+  await assert.rejects(b.acquire(), /Another release/);
+  await b.unlock();
+  assert.equal(await readFile(join(a.stateDir, "lock"), "utf8"), String(process.pid));
+  await a.unlock();
+  await b.acquire();
+  await b.unlock();
 });
 
-test("complete follow-up release uses plugin-calculated minor and subsequent run is a no-op", async (t) => {
+test("completed legacy recovery is recognized without rewriting an existing release or dry-run state", async (t) => {
+  const h = await harness(t, { dryRun: true });
+  await h.baseline();
+  await h.change("fix: update");
+  const s = h.session();
+  await s.initialize();
+  const candidate = await s.prepare("0.1.1");
+  for (const [file, data] of Object.entries(candidate.manifests))
+    await writeFile(join(h.dir, file), data.content);
+  const base = await h.git(["rev-parse", "HEAD"]);
+  await h.git(["add", "."]);
+  await h.git(["commit", "-m", "chore: release v0.1.1"]);
+  await h.git(["tag", "--annotate", "v0.1.1", "-m", "released"]);
+  const commit = await h.git(["rev-parse", "HEAD"]);
+  h.network.remoteHead = commit;
+  h.network.tags.set("refs/tags/v0.1.1", { object: await h.git(["rev-parse", "v0.1.1"]), commit });
+  h.network.published = {
+    name: h.pkg.name,
+    version: "0.1.1",
+    dist: { integrity: candidate.integrity },
+  };
+  h.network.releases.set("v0.1.1", {
+    tag_name: "v0.1.1",
+    body: "Existing independently written notes",
+    draft: false,
+    prerelease: false,
+  });
+  await mkdir(s.stateDir, { recursive: true });
+  const data = JSON.stringify({
+    schema: 1,
+    name: h.pkg.name,
+    repo: s.repo,
+    version: "0.1.1",
+    base,
+    commit,
+    previousTag: "v0.1.0",
+    notes: "different old notes",
+    manifests: candidate.manifests,
+    integrity: candidate.integrity,
+  });
+  await writeFile(s.statePath, data);
+  const recovered = h.session();
+  await recovered.initialize();
+  assert.equal(recovered.state, null);
+  assert.equal(recovered.completedLegacy, true);
+  assert.equal(await readFile(s.statePath, "utf8"), data);
+  assert.equal(h.network.releases.get("v0.1.1").body, "Existing independently written notes");
+});
+
+test("missing local recovery state cannot silently reconstruct a tagged npm package", async (t) => {
   const h = await harness(t);
-  const first = h.session();
-  await first.initialize();
-  await first.acquire();
-  await h.fastPrepare(first);
-  try {
-    await first.perform("0.1.0", "Initial release.");
-  } finally {
-    await first.unlock();
-  }
-  await h.git(["commit", "--allow-empty", "-m", "fix: correct old icon"]);
-  await h.git(["commit", "--allow-empty", "-m", "feat: add new icon"]);
+  await h.baseline();
+  await h.change("fix: update");
+  h.network.fail = "npm before";
+  const failed = h.session();
+  await assert.rejects(executeRelease(failed), /upload outcome is uncertain/);
+  await rm(failed.statePath);
+  await assert.rejects(h.session().initialize(), /without local recovery state/);
+  assert.equal(h.network.publications, 0);
+});
+
+test("reverted library changes plus a version-only bump do not create a release", async (t) => {
+  const h = await harness(t);
+  await h.baseline();
+  await h.change("feat: temporary change");
+  const pkg = { ...h.pkg, version: "0.1.1" };
+  await writeFile(join(h.dir, "package.json"), JSON.stringify(pkg));
+  const lock = JSON.parse(await readFile(join(h.dir, "package-lock.json"), "utf8"));
+  lock.version = "0.1.1";
+  lock.packages[""].version = "0.1.1";
+  await writeFile(join(h.dir, "package-lock.json"), JSON.stringify(lock));
+  await h.git(["add", "."]);
+  await h.git(["commit", "-m", "chore: restore source and prepare version"]);
   h.network.remoteHead = await h.git(["rev-parse", "HEAD"]);
-  const cwd = process.cwd();
-  try {
-    process.chdir(h.dir);
-    await runRelease(h.session());
-    assert.equal(JSON.parse(await readFile(join(h.dir, "package.json"), "utf8")).version, "0.2.0");
-    assert.equal(h.network.publishes, 2);
-    assert.equal(h.network.posts, 2);
-    assert.match(h.network.githubRelease.body, /add new icon/);
-    const head = await h.git(["rev-parse", "HEAD"]);
-    await runRelease(h.session());
-    assert.equal(await h.git(["rev-parse", "HEAD"]), head);
-    assert.equal(h.network.publishes, 2);
-    assert.equal(h.network.posts, 2);
-  } finally {
-    process.chdir(cwd);
-  }
-});
-
-test("declining final publication leaves only private recovery state", async (t) => {
-  const h = await harness(t);
   const s = h.session();
   await s.initialize();
-  await s.acquire();
-  await h.fastPrepare(s);
-  let prompts = 0;
-  s.ask = async () => ++prompts === 1;
-  try {
-    await s.perform("0.1.0", "Initial release.");
-  } finally {
-    await s.unlock();
-  }
-  assert.equal(await h.git(["rev-parse", "HEAD"]), h.base);
-  assert.equal(await h.git(["status", "--porcelain"]), "");
-  assert.equal(await h.git(["tag", "--list"]), "");
-  assert.equal(h.network.publishes + h.network.posts + h.network.pushes, 0);
-  assert.equal(JSON.parse(await readFile(s.statePath, "utf8")).version, "0.1.0");
+  assert.equal(s.changes.length, 0);
 });
 
-test("recovery rejects unrelated staged content even if the worktree was restored", async (t) => {
+test("local npm upload waits for visibility and never submits a successful version twice", async (t) => {
   const h = await harness(t);
-  const s = h.session();
-  await s.initialize();
-  await s.acquire();
-  await h.fastPrepare(s);
-  let prompts = 0;
-  s.ask = async () => ++prompts === 1;
-  try {
-    await s.perform("0.1.0", "Initial release.");
-  } finally {
-    await s.unlock();
-  }
-  const path = join(h.dir, "build.mjs");
-  const before = await readFile(path, "utf8");
-  await writeFile(path, `${before}\n// staged change\n`);
-  await h.git(["add", "build.mjs"]);
-  await writeFile(path, before);
-  await assert.rejects(s.checkTree(), /Unrelated recovery changes/);
-  assert.equal(h.network.publishes + h.network.posts + h.network.pushes, 0);
+  await h.baseline();
+  await h.change("fix: update");
+  h.network.delay = 3;
+  await executeRelease(h.session());
+  assert.equal(h.network.publications, 1);
+  assert.equal(h.network.waits, 3);
+  assert(h.network.releases.has("v0.1.1"));
+  await executeRelease(h.session());
+  assert.equal(h.network.publications, 1);
 });
 
-for (const condition of [
-  "dirty",
-  "branch",
-  "upstream",
-  "remote",
-  "gh",
-  "registry",
-  "rules",
-  "2fa",
-  "non-tty",
-  "ci",
-]) {
-  test(`preflight blocks ${condition} before any release mutation`, async (t) => {
+for (const failure of ["npm before", "npm after"]) {
+  test(`uncertain local upload (${failure}) cannot be blindly resubmitted`, async (t) => {
     const h = await harness(t);
-    const s = h.session();
-    if (condition === "dirty") await writeFile(join(h.dir, "untracked.txt"), "not a secret");
-    if (condition === "branch") await h.git(["checkout", "-b", "other"]);
-    if (condition === "upstream") await h.git(["config", "--unset", "branch.main.merge"]);
-    if (condition === "remote") h.network.remoteHead = "0".repeat(40);
-    if (["gh", "registry"].includes(condition)) h.network.fail = condition;
-    if (condition === "rules") h.network.rules = [{ type: "pull_request" }];
-    if (condition === "2fa") h.network.tfa = "auth-only";
-    if (condition === "non-tty") s.tty = false;
-    if (condition === "ci") s.ci = true;
-    await assert.rejects(s.initialize());
-    assert.equal(h.network.publishes + h.network.pushes + h.network.posts, 0);
+    await h.baseline();
+    await h.change("fix: update");
+    h.network.fail = failure;
+    const failed = h.session();
+    await assert.rejects(executeRelease(failed), /upload outcome is uncertain/);
+    const state = JSON.parse(await readFile(failed.statePath));
+    assert.equal(state.npmPublishAccepted, null);
+    h.network.fail = null;
+    if (failure === "npm before") {
+      await assert.rejects(executeRelease(h.session()), /remains unavailable/);
+      assert.equal(h.network.publications, 0);
+      assert.equal(h.network.waits, 30);
+    } else {
+      await executeRelease(h.session());
+      assert.equal(h.network.publications, 1);
+      assert(h.network.releases.has("v0.1.1"));
+    }
   });
 }
 
-test("recovery refuses modified files, corrupted archive and conflicting npm integrity", async (t) => {
-  const h = await harness(t);
-  const s = h.session();
-  await s.initialize();
-  await s.acquire();
-  await h.fastPrepare(s);
-  let asks = 0;
-  s.ask = async () => ++asks === 1;
-  await s.perform("0.1.0", "Initial release.");
-  await s.unlock();
-  const path = join(h.dir, "package.json");
-  const original = await readFile(path, "utf8");
-  await writeFile(path, original.replace('"0.1.0"', '"9.9.9"'));
-  await assert.rejects(s.checkTree(), /modified externally/);
-  await writeFile(path, original);
-  h.network.published = { name: h.pkg.name, version: "0.1.0", dist: { integrity: "different" } };
-  await assert.rejects(s.finish(), /integrity conflict/);
-  h.network.published = null;
-  await writeFile(join(s.stateDir, "package.tgz"), "corrupt");
-  await assert.rejects(s.finish(), /tarball changed/);
-  assert.equal(await h.git(["rev-parse", "HEAD"]), h.base);
+test("corrupted local archive and conflicting npm integrity stop recovery", async (t) => {
+  for (const condition of ["archive", "npm"]) {
+    const h = await harness(t);
+    await h.baseline();
+    await h.change("fix: update");
+    h.network.fail = "github";
+    const failed = h.session();
+    await assert.rejects(executeRelease(failed), /github release failed/);
+    const publications = h.network.publications;
+    h.network.fail = null;
+    if (condition === "archive") await writeFile(join(failed.stateDir, "package.tgz"), "corrupt");
+    else h.network.conflict = true;
+    await assert.rejects(
+      executeRelease(h.session()),
+      condition === "archive" ? /tarball changed/ : /integrity conflict/,
+    );
+    assert.equal(h.network.publications, publications);
+  }
 });
 
-test("parallel releases are locked without deleting another process lock", async (t) => {
+test("real releases refuse CI and a new npm upload requires an interactive local terminal", async (t) => {
   const h = await harness(t);
-  const first = h.session();
-  await first.initialize();
-  await first.acquire();
-  const second = h.session();
-  await second.initialize();
-  await assert.rejects(second.acquire(), /Another release/);
-  assert.equal(await readFile(join(first.stateDir, "lock"), "utf8"), String(process.pid));
-  await first.unlock();
+  await h.baseline();
+  await h.change("fix: update");
+  const ci = h.session();
+  ci.ci = true;
+  await assert.rejects(ci.initialize(), /locally, not from CI/);
+  const nonterminal = h.session();
+  nonterminal.tty = false;
+  await assert.rejects(executeRelease(nonterminal), /terminal/);
+  assert.equal(h.network.publications, 0);
+  const state = JSON.parse(await readFile(nonterminal.statePath));
+  assert.equal(state.npmPublishAccepted, false);
 });
 
-test("command errors never echo subprocess output or supplied arguments", async () => {
-  const marker = "synthetic-sensitive-marker-not-a-real-secret";
+test("version helpers handle large integers and relevant commit filtering", () => {
+  assert.equal(compareVersions("9007199254740993.0.0", "9007199254740992.0.0"), 1);
+  assert.equal(nextVersion("0.1.9", 1), "0.2.0");
+  assert.equal(
+    recommend([{ hash: "a", type: "feat", header: "feat: add", notes: [] }], new Set()),
+    null,
+  );
+});
+
+test("command errors suppress subprocess output and supplied arguments", async () => {
   await assert.rejects(
-    command(process.execPath, ["-e", `console.error(${JSON.stringify(marker)}); process.exit(1)`]),
-    (error) => {
-      assert(!error.message.includes(marker));
-      return true;
-    },
+    command(process.execPath, ["-e", "console.error('private-value');process.exit(1)"]),
+    (error) => !error.message.includes("private-value"),
   );
 });
